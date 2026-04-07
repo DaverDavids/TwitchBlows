@@ -25,6 +25,7 @@
 // ── Configuration ─────────────────────────────
 #define HOSTNAME      "twitchblows"
 #define WIFI_TIMEOUT  15000      // ms to wait for STA connection
+
 #define AP_SSID       HOSTNAME   // Captive portal AP name
 
 // SN74HC595 pins (adjust to your wiring)
@@ -38,7 +39,12 @@ DNSServer  dns;
 Preferences prefs;
 
 bool       apMode   = false;
-int8_t     activeQ  = -1;   // -1 = all off, 0-7 = active output
+int8_t     activeQ  = -1;   // -1 = all off, 0-7 = active output (toggle)
+
+// Pulse state
+bool       pulseActive = false;
+int8_t     pulseQ      = -1;
+uint32_t   pulseEnd    = 0;   // millis() when pulse should end
 
 // ── 595 helper ────────────────────────────────
 void shiftWrite(uint8_t val) {
@@ -88,6 +94,10 @@ void handleRoot() {
 }
 
 void handleSet() {
+  // Cancel any active pulse when explicitly setting an output
+  pulseActive = false;
+  pulseQ      = -1;
+
   if (server.hasArg("q")) {
     int q = server.arg("q").toInt();
     if (q < 0 || q > 7) q = -1;
@@ -97,8 +107,42 @@ void handleSet() {
   server.send(200, "application/json", json);
 }
 
+// /pulse?q=N&ms=M  — raise output N for M milliseconds then drop it
+void handlePulse() {
+  if (!server.hasArg("q") || !server.hasArg("ms")) {
+    server.send(400, "application/json", "{\"ok\":false,\"err\":\"missing q or ms\"}");
+    return;
+  }
+
+  int q  = server.arg("q").toInt();
+  int ms = server.arg("ms").toInt();
+
+  if (q < 0 || q > 7) {
+    server.send(400, "application/json", "{\"ok\":false,\"err\":\"q out of range\"}");
+    return;
+  }
+  if (ms < 10)    ms = 10;
+  if (ms > 30000) ms = 30000;
+
+  // Cancel any current toggle or previous pulse first
+  activeQ = -1;
+
+  // Raise the pin
+  shiftWrite(1 << q);
+  pulseActive = true;
+  pulseQ      = (int8_t)q;
+  pulseEnd    = millis() + (uint32_t)ms;
+
+  DPRINT("Pulse Q"); DPRINT(q); DPRINT(" for "); DPRINT(ms); DPRINTLN("ms");
+
+  String json = "{\"ok\":true,\"q\":" + String(q) + ",\"ms\":" + String(ms) + "}";
+  server.send(200, "application/json", json);
+}
+
 void handleState() {
-  String json = "{\"active\":" + String(activeQ) + "}";
+  String json = "{\"active\":" + String(activeQ) +
+                ",\"pulse\":" + (pulseActive ? "true" : "false") +
+                ",\"pulseQ\":" + String(pulseActive ? pulseQ : -1) + "}";
   server.send(200, "application/json", json);
 }
 
@@ -111,7 +155,7 @@ void handleSaveWifi() {
     prefs.putString("psk",  psk);
     prefs.end();
     server.send(200, "text/html",
-      "<html><body style='font-family:sans-serif;background:#1a1a2e;color:#eee;text-align:center;padding:2rem'>"
+      "<html><body style='font-family:sans-serif;background:#0f1117;color:#e2e8f0;text-align:center;padding:2rem'>"
       "<h2 style='color:#e94560'>Saved!</h2><p>Rebooting to connect...</p></body></html>");
     delay(1500);
     ESP.restart();
@@ -181,6 +225,7 @@ void setup() {
   // Web routes
   server.on("/",          handleRoot);
   server.on("/set",       handleSet);
+  server.on("/pulse",     handlePulse);
   server.on("/state",     handleState);
   server.on("/savewifi",  handleSaveWifi);
   server.onNotFound(      handleNotFound);
@@ -192,6 +237,14 @@ void setup() {
 void loop() {
   if (!apMode) {
     ArduinoOTA.handle();
+
+    // ── Pulse auto-off ──────────────────────
+    if (pulseActive && (millis() >= pulseEnd)) {
+      shiftWrite(0);          // drop the pin
+      pulseActive = false;
+      pulseQ      = -1;
+      DPRINTLN("Pulse ended — output OFF");
+    }
 
     // Reconnect STA if dropped
     if (WiFi.status() != WL_CONNECTED) {
