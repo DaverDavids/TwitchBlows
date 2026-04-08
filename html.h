@@ -60,9 +60,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       max-width: 560px;
     }
 
-    .logo-mark {
-      width: 36px; height: 36px; flex-shrink: 0;
-    }
+    .logo-mark { width: 36px; height: 36px; flex-shrink: 0; }
 
     h1 {
       font-family: var(--font-mono);
@@ -161,10 +159,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .pulse-row input::-webkit-outer-spin-button,
     .pulse-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
 
-    .pulse-row .unit {
-      font-size: 0.75rem;
-      color: var(--muted);
-    }
+    .pulse-row .unit { font-size: 0.75rem; color: var(--muted); }
 
     /* ── Output grid ── */
     .grid {
@@ -198,7 +193,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
 
     .output-btn:active { transform: scale(0.96); }
-
     .output-btn .q-label { font-size: 1.05rem; }
     .output-btn .q-sub {
       font-size: 0.6rem;
@@ -209,7 +203,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       opacity: 0.7;
     }
 
-    /* Indicator dot */
     .output-btn::before {
       content: '';
       position: absolute;
@@ -220,7 +213,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       transition: background var(--transition), box-shadow var(--transition);
     }
 
-    /* Active toggle state */
     .output-btn.active-toggle {
       background: var(--accent-dim);
       border-color: var(--accent);
@@ -232,7 +224,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       box-shadow: 0 0 6px var(--accent);
     }
 
-    /* Active pulse state */
     .output-btn.active-pulse {
       background: var(--amber-dim);
       border-color: var(--amber);
@@ -250,7 +241,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       to   { box-shadow: 0 0 22px var(--amber); }
     }
 
-    /* ── Pulse progress bar ── */
     .pulse-bar {
       position: absolute;
       bottom: 0; left: 0;
@@ -259,7 +249,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       border-radius: 0 0 var(--radius) var(--radius);
       width: 100%;
       transform-origin: left;
-      transition: transform linear;
       transform: scaleX(1);
     }
 
@@ -320,7 +309,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       font-family: var(--font-mono);
     }
 
-    /* ── Responsive ── */
     @media (max-width: 420px) {
       .mode-bar { flex-direction: column; align-items: flex-start; }
       .pulse-row { margin-left: 0; }
@@ -339,7 +327,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <h1><span>Twitch</span>Blows</h1>
 </header>
 
-<!-- Mode selector + pulse duration -->
 <div class="mode-bar">
   <span class="mode-label">Mode</span>
   <div class="mode-toggle">
@@ -353,26 +340,46 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   </div>
 </div>
 
-<!-- Output buttons Q0-Q7 -->
 <div class="grid" id="grid"></div>
 
-<!-- All Off -->
 <div class="bottom-row">
   <button class="all-off-btn" onclick="allOff()">&#11035; ALL OFF</button>
 </div>
 
-<!-- Status -->
 <div class="status-bar">
   <div class="status-dot" id="status-dot"></div>
   <span id="status-text">Loading&#8230;</span>
 </div>
 
 <script>
+  // ── Persistence helpers ────────────────────
+  const LS_MODE = 'tb_mode';
+  const LS_MS   = 'tb_pulsems';
+
+  function savePrefs() {
+    try {
+      localStorage.setItem(LS_MODE, mode);
+      localStorage.setItem(LS_MS,   document.getElementById('pulse-ms').value);
+    } catch(e) {}
+  }
+
+  function loadPrefs() {
+    try {
+      const savedMode = localStorage.getItem(LS_MODE);
+      const savedMs   = localStorage.getItem(LS_MS);
+      if (savedMode === 'toggle' || savedMode === 'pulse') mode = savedMode;
+      if (savedMs !== null) {
+        const ms = parseInt(savedMs);
+        if (ms >= 10 && ms <= 30000) document.getElementById('pulse-ms').value = ms;
+      }
+    } catch(e) {}
+  }
+
   // ── State ──────────────────────────────────
-  let mode     = 'toggle';   // 'toggle' | 'pulse'
-  let activeQ  = -1;         // currently-on output (toggle)
-  let pulseTimers = {};      // q -> setTimeout ID
-  let pulseBars   = {};      // q -> { raf }
+  let mode        = 'toggle';
+  let activeQ     = -1;
+  let pulseTimers = {};
+  let pulseBars   = {};
 
   // ── Build buttons ─────────────────────────
   const grid = document.getElementById('grid');
@@ -388,21 +395,33 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     grid.appendChild(btn);
   }
 
+  // ── Restore prefs before rendering ────────
+  loadPrefs();
+  applyModeUI(mode);
+
+  // Save duration whenever it changes
+  document.getElementById('pulse-ms').addEventListener('change', savePrefs);
+  document.getElementById('pulse-ms').addEventListener('input',  savePrefs);
+
   // ── Mode switching ─────────────────────────
   function setMode(m) {
     mode = m;
+    applyModeUI(m);
+    savePrefs();
+  }
+
+  function applyModeUI(m) {
     document.getElementById('btn-toggle-mode').classList.toggle('active', m === 'toggle');
     document.getElementById('btn-pulse-mode').classList.toggle('active', m === 'pulse');
     const pr = document.getElementById('pulse-row');
-    pr.style.opacity      = m === 'pulse' ? '1'    : '0.35';
-    pr.style.pointerEvents= m === 'pulse' ? 'auto' : 'none';
+    pr.style.opacity       = m === 'pulse' ? '1'    : '0.35';
+    pr.style.pointerEvents = m === 'pulse' ? 'auto' : 'none';
   }
 
   // ── Button click ──────────────────────────
   function handleBtnClick(i) {
     if (mode === 'toggle') {
-      const target = (activeQ === i) ? -1 : i;
-      sendSet(target);
+      sendSet(activeQ === i ? -1 : i);
     } else {
       const ms = Math.max(10, parseInt(document.getElementById('pulse-ms').value) || 500);
       sendPulse(i, ms);
@@ -413,11 +432,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function sendSet(q) {
     fetch('/set?q=' + q)
       .then(r => r.json())
-      .then(data => {
-        activeQ = data.active;
-        updateToggleUI();
-        updateStatus();
-      })
+      .then(data => { activeQ = data.active; updateToggleUI(); updateStatus(); })
       .catch(() => setStatusText('Error contacting device'));
   }
 
@@ -426,9 +441,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     cancelPulse(q);
     fetch('/pulse?q=' + q + '&ms=' + ms)
       .then(r => r.json())
-      .then(data => {
-        if (data.ok) startPulseUI(q, ms);
-      })
+      .then(data => { if (data.ok) startPulseUI(q, ms); })
       .catch(() => setStatusText('Error contacting device'));
   }
 
