@@ -25,26 +25,28 @@
 // ── Configuration ─────────────────────────────
 #define HOSTNAME      "twitchblows"
 #define WIFI_TIMEOUT  15000      // ms to wait for STA connection
-
 #define AP_SSID       HOSTNAME   // Captive portal AP name
 
 // SN74HC595 pins (adjust to your wiring)
-#define PIN_DATA      4    // DS   (SER)
-#define PIN_CLOCK     5    // SRCLK
-#define PIN_LATCH     6    // RCLK (ST_CP)
+#define PIN_DATA      4    // DS   (SER)   → 595 pin 14
+#define PIN_CLOCK     5    // SRCLK        → 595 pin 11
+#define PIN_LATCH     6    // RCLK (ST_CP) → 595 pin 12
+// Reminder: 595 pin 13 (OE)   → GND  (active-low, must not float)
+//           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
+//           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
 // ── Globals ───────────────────────────────────
-WebServer  server(80);
-DNSServer  dns;
+WebServer   server(80);
+DNSServer   dns;
 Preferences prefs;
 
-bool       apMode   = false;
-int8_t     activeQ  = -1;   // -1 = all off, 0-7 = active output (toggle)
+bool    apMode  = false;
+int8_t  activeQ = -1;   // -1 = all off, 0-7 = active output (toggle)
 
 // Pulse state
-bool       pulseActive = false;
-int8_t     pulseQ      = -1;
-uint32_t   pulseEnd    = 0;   // millis() when pulse should end
+bool     pulseActive = false;
+int8_t   pulseQ      = -1;
+uint32_t pulseEnd    = 0;   // millis() when pulse should end
 
 // ── 595 helper ────────────────────────────────
 void shiftWrite(uint8_t val) {
@@ -57,6 +59,16 @@ void setOutput(int8_t q) {
   activeQ = q;
   shiftWrite((q >= 0) ? (1 << q) : 0);
   DPRINT("Output set to Q"); DPRINTLN(q);
+}
+
+// ── JSON response helper ────────────────────────
+// Sends JSON with keep-alive so the browser reuses the TCP connection,
+// eliminating per-request handshake overhead and cutting response latency.
+void sendJSON(int code, const String &json) {
+  server.sendHeader("Connection",                "keep-alive");
+  server.sendHeader("Cache-Control",             "no-store");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(code, "application/json", json);
 }
 
 // ── WiFi ──────────────────────────────────────
@@ -81,7 +93,7 @@ void startAP() {
   WiFi.softAP(AP_SSID);
   dns.start(53, "*", WiFi.softAPIP());
   DPRINT("AP started: "); DPRINTLN(AP_SSID);
-  DPRINT("AP IP: "); DPRINTLN(WiFi.softAPIP());
+  DPRINT("AP IP: ");      DPRINTLN(WiFi.softAPIP());
 }
 
 // ── Web routes ────────────────────────────────
@@ -94,7 +106,6 @@ void handleRoot() {
 }
 
 void handleSet() {
-  // Cancel any active pulse when explicitly setting an output
   pulseActive = false;
   pulseQ      = -1;
 
@@ -103,14 +114,13 @@ void handleSet() {
     if (q < 0 || q > 7) q = -1;
     setOutput((int8_t)q);
   }
-  String json = "{\"active\":" + String(activeQ) + "}";
-  server.send(200, "application/json", json);
+  sendJSON(200, "{\"active\":" + String(activeQ) + "}");
 }
 
-// /pulse?q=N&ms=M  — raise output N for M milliseconds then drop it
+// /pulse?q=N&ms=M  — raise output N for M ms then auto-drop in loop()
 void handlePulse() {
   if (!server.hasArg("q") || !server.hasArg("ms")) {
-    server.send(400, "application/json", "{\"ok\":false,\"err\":\"missing q or ms\"}");
+    sendJSON(400, "{\"ok\":false,\"err\":\"missing q or ms\"}");
     return;
   }
 
@@ -118,16 +128,13 @@ void handlePulse() {
   int ms = server.arg("ms").toInt();
 
   if (q < 0 || q > 7) {
-    server.send(400, "application/json", "{\"ok\":false,\"err\":\"q out of range\"}");
+    sendJSON(400, "{\"ok\":false,\"err\":\"q out of range\"}");
     return;
   }
   if (ms < 10)    ms = 10;
   if (ms > 30000) ms = 30000;
 
-  // Cancel any current toggle or previous pulse first
   activeQ = -1;
-
-  // Raise the pin
   shiftWrite(1 << q);
   pulseActive = true;
   pulseQ      = (int8_t)q;
@@ -135,15 +142,14 @@ void handlePulse() {
 
   DPRINT("Pulse Q"); DPRINT(q); DPRINT(" for "); DPRINT(ms); DPRINTLN("ms");
 
-  String json = "{\"ok\":true,\"q\":" + String(q) + ",\"ms\":" + String(ms) + "}";
-  server.send(200, "application/json", json);
+  sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"ms\":" + String(ms) + "}");
 }
 
 void handleState() {
   String json = "{\"active\":" + String(activeQ) +
-                ",\"pulse\":" + (pulseActive ? "true" : "false") +
+                ",\"pulse\":"  + (pulseActive ? "true" : "false") +
                 ",\"pulseQ\":" + String(pulseActive ? pulseQ : -1) + "}";
-  server.send(200, "application/json", json);
+  sendJSON(200, json);
 }
 
 void handleSaveWifi() {
@@ -165,7 +171,6 @@ void handleSaveWifi() {
   }
 }
 
-// Redirect all unknown AP requests to captive portal
 void handleNotFound() {
   if (apMode) {
     server.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/");
@@ -194,13 +199,13 @@ void setup() {
 #endif
   DPRINTLN("\n\n=== TwitchBlows ===");
 
-  // 595 pins
+  // 595 pins — initialise latch HIGH before first shiftWrite
   pinMode(PIN_DATA,  OUTPUT);
   pinMode(PIN_CLOCK, OUTPUT);
   pinMode(PIN_LATCH, OUTPUT);
-  setOutput(-1);  // all off at boot
+  digitalWrite(PIN_LATCH, HIGH);  // idle state
+  setOutput(-1);                  // all off at boot
 
-  // Load saved credentials
   prefs.begin("wifi", true);
   String savedSSID = prefs.getString("ssid", MYSSID);
   String savedPSK  = prefs.getString("psk",  MYPSK);
@@ -212,23 +217,19 @@ void setup() {
   } else {
     DPRINT("Connected! IP: "); DPRINTLN(WiFi.localIP());
     apMode = false;
-
-    // mDNS  → http://twitchblows.local
     if (MDNS.begin(HOSTNAME)) {
       MDNS.addService("http", "tcp", 80);
       DPRINTLN("mDNS: http://" HOSTNAME ".local");
     }
-
     setupOTA();
   }
 
-  // Web routes
-  server.on("/",          handleRoot);
-  server.on("/set",       handleSet);
-  server.on("/pulse",     handlePulse);
-  server.on("/state",     handleState);
-  server.on("/savewifi",  handleSaveWifi);
-  server.onNotFound(      handleNotFound);
+  server.on("/",         handleRoot);
+  server.on("/set",      handleSet);
+  server.on("/pulse",    handlePulse);
+  server.on("/state",    handleState);
+  server.on("/savewifi", handleSaveWifi);
+  server.onNotFound(     handleNotFound);
   server.begin();
   DPRINTLN("HTTP server started");
 }
@@ -238,25 +239,29 @@ void loop() {
   if (!apMode) {
     ArduinoOTA.handle();
 
-    // ── Pulse auto-off ──────────────────────
+    // Pulse auto-off — checked every loop iteration, no blocking delay
     if (pulseActive && (millis() >= pulseEnd)) {
-      shiftWrite(0);          // drop the pin
+      shiftWrite(0);
       pulseActive = false;
       pulseQ      = -1;
       DPRINTLN("Pulse ended — output OFF");
     }
 
-    // Reconnect STA if dropped
-    if (WiFi.status() != WL_CONNECTED) {
-      DPRINTLN("WiFi lost, reconnecting...");
-      prefs.begin("wifi", true);
-      String ssid = prefs.getString("ssid", MYSSID);
-      String psk  = prefs.getString("psk",  MYPSK);
-      prefs.end();
-      if (!connectWifi(ssid, psk)) {
-        DPRINTLN("Reconnect failed — fallback to AP");
-        startAP();
-        server.begin();
+    // WiFi reconnect — debounced to every 5 s so a drop never stalls the loop
+    static uint32_t lastWifiCheck = 0;
+    if (millis() - lastWifiCheck > 5000) {
+      lastWifiCheck = millis();
+      if (WiFi.status() != WL_CONNECTED) {
+        DPRINTLN("WiFi lost, reconnecting...");
+        prefs.begin("wifi", true);
+        String ssid = prefs.getString("ssid", MYSSID);
+        String psk  = prefs.getString("psk",  MYPSK);
+        prefs.end();
+        if (!connectWifi(ssid, psk)) {
+          DPRINTLN("Reconnect failed — fallback to AP");
+          startAP();
+          server.begin();
+        }
       }
     }
   } else {
