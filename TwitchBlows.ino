@@ -31,7 +31,7 @@
 #define PIN_DATA      4    // DS   (SER)   → 595 pin 14
 #define PIN_CLOCK     5    // SRCLK        → 595 pin 11
 #define PIN_LATCH     6    // RCLK (ST_CP) → 595 pin 12
-// Reminder: 595 pin 13 (OE)   → GND  (active-low, must not float)
+#define PIN_OE        3    // OE  (active-low) → 595 pin 13
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
@@ -200,11 +200,17 @@ void setup() {
   DPRINTLN("\n\n=== TwitchBlows ===");
 
   // 595 pins — initialise latch HIGH before first shiftWrite
+  // OE pulled HIGH at boot to keep outputs disabled until we're ready
   pinMode(PIN_DATA,  OUTPUT);
   pinMode(PIN_CLOCK, OUTPUT);
   pinMode(PIN_LATCH, OUTPUT);
+  pinMode(PIN_OE,    OUTPUT);
+  digitalWrite(PIN_OE,    HIGH);   // disable outputs during init
   digitalWrite(PIN_LATCH, HIGH);  // idle state
   setOutput(-1);                  // all off at boot
+
+  // Enable 595 outputs after init is complete
+  digitalWrite(PIN_OE, LOW);
 
   prefs.begin("wifi", true);
   String savedSSID = prefs.getString("ssid", MYSSID);
