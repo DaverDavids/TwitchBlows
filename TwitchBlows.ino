@@ -29,8 +29,8 @@
 
 // SN74HC595 pins (adjust to your wiring)
 #define PIN_DATA      4    // DS   (SER)   → 595 pin 14
-#define PIN_CLOCK     5    // SRCLK        → 595 pin 11
-#define PIN_LATCH     6    // RCLK (ST_CP) → 595 pin 12
+#define PIN_CLOCK     6    // SRCLK        → 595 pin 11
+#define PIN_LATCH     5    // RCLK (ST_CP) → 595 pin 12
 #define PIN_OE        3    // OE  (active-low) → 595 pin 13
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
