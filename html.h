@@ -25,7 +25,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       --accent:    #e94560;
       --accent-dim:#e9456033;
       --green:     #22c55e;
-      --green-dim: #22c55e22;
+      --red:       #ef4444;
       --amber:     #f59e0b;
       --amber-dim: #f59e0b22;
       --radius:    10px;
@@ -72,6 +72,43 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     h1 span { color: var(--text); }
 
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; }
+
+    .twitch-dot {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .twitch-dot .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--faint);
+      transition: background var(--transition), box-shadow var(--transition);
+    }
+
+    .twitch-dot.connected .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .twitch-dot.connected { color: var(--green); }
+
+    .cfg-btn {
+      padding: 0.4rem 0.85rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition), border-color var(--transition);
+    }
+
+    .cfg-btn:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+
     /* ── Mode bar ── */
     .mode-bar {
       width: 100%; max-width: 560px;
@@ -115,12 +152,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       white-space: nowrap;
     }
 
-    .mode-toggle button.active {
-      background: var(--accent);
-      color: #fff;
-    }
+    .mode-toggle button.active { background: var(--accent); color: #fff; }
 
-    /* ── Pulse ms row ── */
     .pulse-row {
       display: flex;
       align-items: center;
@@ -151,14 +184,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       transition: border-color var(--transition);
     }
 
-    .pulse-row input[type="number"]:focus {
-      outline: none;
-      border-color: var(--accent);
-    }
-
+    .pulse-row input[type="number"]:focus { outline: none; border-color: var(--accent); }
     .pulse-row input::-webkit-outer-spin-button,
     .pulse-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
-
     .pulse-row .unit { font-size: 0.75rem; color: var(--muted); }
 
     /* ── Output grid ── */
@@ -192,7 +220,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       -webkit-tap-highlight-color: transparent;
     }
 
-    .output-btn:active { transform: scale(0.96); }
+    .output-btn:active:not(.dead) { transform: scale(0.96); }
     .output-btn .q-label { font-size: 1.05rem; }
     .output-btn .q-sub {
       font-size: 0.6rem;
@@ -219,10 +247,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       color: var(--accent);
       box-shadow: 0 0 16px var(--accent-dim);
     }
-    .output-btn.active-toggle::before {
-      background: var(--accent);
-      box-shadow: 0 0 6px var(--accent);
-    }
+    .output-btn.active-toggle::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
 
     .output-btn.active-pulse {
       background: var(--amber-dim);
@@ -231,10 +256,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       box-shadow: 0 0 16px var(--amber-dim);
       animation: pulse-glow 0.7s ease-in-out infinite alternate;
     }
-    .output-btn.active-pulse::before {
-      background: var(--amber);
-      box-shadow: 0 0 6px var(--amber);
+    .output-btn.active-pulse::before { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+    .output-btn.dead {
+      background: var(--surface);
+      border-color: var(--faint);
+      color: var(--faint);
+      cursor: not-allowed;
+      opacity: 0.6;
     }
+    .output-btn.dead::before { background: var(--red); opacity: 0.5; }
 
     @keyframes pulse-glow {
       from { box-shadow: 0 0 8px var(--amber-dim); }
@@ -274,11 +305,23 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       transition: background var(--transition), border-color var(--transition), color var(--transition);
     }
 
-    .all-off-btn:hover {
-      background: var(--surface-2);
-      border-color: var(--accent);
-      color: var(--accent);
+    .all-off-btn:hover { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
+
+    .reset-used-btn {
+      flex: 1;
+      padding: 0.8rem;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: background var(--transition), border-color var(--transition), color var(--transition);
     }
+
+    .reset-used-btn:hover { background: var(--surface-2); border-color: var(--green); color: var(--green); }
 
     /* ── Status bar ── */
     .status-bar {
@@ -303,15 +346,135 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .status-dot.on-toggle { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .status-dot.on-pulse  { background: var(--amber);  box-shadow: 0 0 6px var(--amber); }
 
-    #status-text {
+    #status-text { font-size: 0.8rem; color: var(--muted); font-family: var(--font-mono); }
+
+    /* ── Config section ── */
+    #config-section {
+      width: 100%; max-width: 560px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      display: none;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    #config-section.visible { display: flex; }
+
+    .cfg-title {
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .cfg-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .cfg-row label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .cfg-row input[type="text"],
+    .cfg-row input[type="password"],
+    .cfg-row input[type="number"] {
+      padding: 0.5rem 0.75rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      transition: border-color var(--transition);
+    }
+
+    .cfg-row input:focus { outline: none; border-color: var(--accent); }
+    .cfg-row input::-webkit-outer-spin-button,
+    .cfg-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+    .cfg-row-inline {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+
+    .cfg-checkboxes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .cfg-checkboxes label {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
       font-size: 0.8rem;
       color: var(--muted);
-      font-family: var(--font-mono);
+      cursor: pointer;
+      padding: 0.3rem 0.6rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      transition: border-color var(--transition), color var(--transition);
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
     }
+
+    .cfg-checkboxes label:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+    .cfg-checkboxes input { display: none; }
+
+    .cfg-actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 0.25rem;
+    }
+
+    .cfg-save-btn {
+      flex: 1;
+      padding: 0.75rem;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 700;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: opacity var(--transition);
+    }
+
+    .cfg-save-btn:hover { opacity: 0.85; }
+    .cfg-cancel-btn {
+      padding: 0.75rem 1.25rem;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    .cfg-cancel-btn:hover { background: var(--surface); color: var(--text); }
 
     @media (max-width: 420px) {
       .mode-bar { flex-direction: column; align-items: flex-start; }
       .pulse-row { margin-left: 0; }
+      .cfg-row-inline { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -325,6 +488,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <path d="M18 14 L18 7 M18 22 L18 29 M14 16 L9 12 M22 20 L27 24 M14 20 L9 24 M22 16 L27 12" stroke="#e94560" stroke-width="1.4" opacity="0.5"/>
   </svg>
   <h1><span>Twitch</span>Blows</h1>
+  <div class="header-right">
+    <div class="twitch-dot" id="twitch-dot">
+      <div class="dot"></div>
+      <span>Twitch</span>
+    </div>
+    <button class="cfg-btn" onclick="toggleConfig()">Config</button>
+  </div>
 </header>
 
 <div class="mode-bar">
@@ -344,11 +514,54 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <div class="bottom-row">
   <button class="all-off-btn" onclick="allOff()">&#11035; ALL OFF</button>
+  <button class="reset-used-btn" onclick="resetUsed()">&#8635; RESET DEAD</button>
 </div>
 
 <div class="status-bar">
   <div class="status-dot" id="status-dot"></div>
   <span id="status-text">Loading&#8230;</span>
+</div>
+
+<div id="config-section">
+  <div class="cfg-title">TwitchBlows Config</div>
+
+  <div class="cfg-row">
+    <label for="cfg-channel">Twitch Channel</label>
+    <input type="text" id="cfg-channel" placeholder="daverdavid">
+  </div>
+
+  <div class="cfg-row">
+    <label for="cfg-oauth">OAuth Token</label>
+    <input type="password" id="cfg-oauth" placeholder="oauth:...">
+  </div>
+
+  <div class="cfg-row">
+    <label for="cfg-nick">Bot Nickname</label>
+    <input type="text" id="cfg-nick" placeholder="your_bot_username">
+  </div>
+
+  <div class="cfg-row-inline">
+    <div class="cfg-row">
+      <label for="cfg-bits">Bits Threshold</label>
+      <input type="number" id="cfg-bits" value="100" min="1" max="10000" step="1">
+    </div>
+    <div class="cfg-row">
+      <label for="cfg-pulse">Pulse Duration (ms)</label>
+      <input type="number" id="cfg-pulse" value="500" min="10" max="30000" step="10">
+    </div>
+  </div>
+
+  <div class="cfg-checkboxes">
+    <label><input type="checkbox" id="cb-bits"   checked> Bits</label>
+    <label><input type="checkbox" id="cb-subs"   disabled> Subs</label>
+    <label><input type="checkbox" id="cb-points" disabled> Channel Points</label>
+    <label><input type="checkbox" id="cb-raids"  disabled> Raids</label>
+  </div>
+
+  <div class="cfg-actions">
+    <button class="cfg-save-btn" onclick="saveCfg()">Save Config</button>
+    <button class="cfg-cancel-btn" onclick="toggleConfig()">Cancel</button>
+  </div>
 </div>
 
 <script>
@@ -380,10 +593,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let activeQ     = -1;
   let pulseTimers = {};
   let pulseBars   = {};
+  let usedMask    = 0;
+  let twitchConn  = false;
 
   // ── Build buttons ─────────────────────────
   const grid = document.getElementById('grid');
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 16; i++) {
     const btn = document.createElement('button');
     btn.className = 'output-btn';
     btn.id = 'btn' + i;
@@ -395,11 +610,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     grid.appendChild(btn);
   }
 
-  // ── Restore prefs before rendering ────────
   loadPrefs();
   applyModeUI(mode);
 
-  // Save duration whenever it changes
   document.getElementById('pulse-ms').addEventListener('change', savePrefs);
   document.getElementById('pulse-ms').addEventListener('input',  savePrefs);
 
@@ -420,6 +633,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   // ── Button click ──────────────────────────
   function handleBtnClick(i) {
+    const btn = document.getElementById('btn' + i);
+    if (btn && btn.classList.contains('dead')) return;
     if (mode === 'toggle') {
       sendSet(activeQ === i ? -1 : i);
     } else {
@@ -476,15 +691,38 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     pulseTimers[q] = setTimeout(() => { cancelPulse(q); updateStatus(); }, ms + 300);
   }
 
-  // ── All off ───────────────────────────────
+  // ── All off & reset used ─────────────────────────────
   function allOff() {
-    for (let i = 0; i < 8; i++) cancelPulse(i);
+    for (let i = 0; i < 16; i++) cancelPulse(i);
     sendSet(-1);
+  }
+
+  function resetUsed() {
+    fetch('/resetused')
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          usedMask = 0;
+          updateDeadUI();
+          setStatusText('Dead outputs reset');
+        }
+      })
+      .catch(() => {});
+  }
+
+  // ── Dead output UI ─────────────────────────
+  function updateDeadUI() {
+    for (let i = 0; i < 16; i++) {
+      const btn = document.getElementById('btn' + i);
+      if (btn) {
+        btn.classList.toggle('dead', (usedMask & (1 << i)) !== 0);
+      }
+    }
   }
 
   // ── UI updates ────────────────────────────
   function updateToggleUI() {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 16; i++) {
       const btn = document.getElementById('btn' + i);
       btn.classList.remove('active-toggle');
       if (!pulseTimers[i]) document.getElementById('sub' + i).textContent = '\u2014';
@@ -507,11 +745,71 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   function setStatusText(msg) { document.getElementById('status-text').textContent = msg; }
 
+  // ── State poll ─────────────────────────────
+  function pollState() {
+    fetch('/state')
+      .then(r => r.json())
+      .then(data => {
+        activeQ   = data.active;
+        usedMask  = data.used || 0;
+        twitchConn = data.twitch === true || data.twitch === 'true';
+
+        updateToggleUI();
+        updateDeadUI();
+        updateStatus();
+
+        const td = document.getElementById('twitch-dot');
+        td.className = 'twitch-dot' + (twitchConn ? ' connected' : '');
+      })
+      .catch(() => {});
+  }
+
+  // ── Config ──────────────────────────────
+  function toggleConfig() {
+    const sec = document.getElementById('config-section');
+    const visible = sec.classList.toggle('visible');
+    if (visible) {
+      fetch('/getcfg')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('cfg-channel').value = data.channel || '';
+          document.getElementById('cfg-bits').value   = data.bitsThreshold || 100;
+          document.getElementById('cfg-pulse').value  = data.pulseDurMs || 500;
+          document.getElementById('cfg-oauth').value  = '';
+          document.getElementById('cfg-nick').value   = '';
+        })
+        .catch(() => {});
+    }
+  }
+
+  function saveCfg() {
+    const params = new URLSearchParams();
+    const ch = document.getElementById('cfg-channel').value.trim();
+    const bits = document.getElementById('cfg-bits').value;
+    const pulse = document.getElementById('cfg-pulse').value;
+    const oauth = document.getElementById('cfg-oauth').value.trim();
+    const nick = document.getElementById('cfg-nick').value.trim();
+
+    if (ch) params.append('channel', ch);
+    if (bits) params.append('bits_threshold', bits);
+    if (pulse) params.append('pulse_ms', pulse);
+    if (oauth) params.append('oauth', oauth);
+    if (nick) params.append('nick', nick);
+
+    fetch('/savecfg', { method: 'POST', body: params })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          setStatusText('Config saved');
+          toggleConfig();
+        }
+      })
+      .catch(() => setStatusText('Error saving config'));
+  }
+
   // ── Init ──────────────────────────────────
-  fetch('/state')
-    .then(r => r.json())
-    .then(data => { activeQ = data.active; updateToggleUI(); updateStatus(); })
-    .catch(() => setStatusText('Could not reach device'));
+  pollState();
+  setInterval(pollState, 3000);
 </script>
 </body>
 </html>

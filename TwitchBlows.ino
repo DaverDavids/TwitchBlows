@@ -36,9 +36,7 @@
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
-#define PIN_CURRENT   A0   // Analog pin for current sense
-
-#define TWITCH_CHANNEL "daverdavid"   // set your Twitch channel here
+#define PIN_CURRENT   0   // GPIO0 — change to whichever ADC-capable pin you're using
 
 // ── Globals ───────────────────────────────────
 WebServer   server(80);
@@ -65,6 +63,7 @@ unsigned long     lastTwitchPing = 0;
 // Twitch trigger config
 int     bitsThreshold = 100;    // bits needed to trigger one output
 uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
+String  twitchChannel = "daverdavid";  // loaded from prefs
 
 // ── 595 helper ────────────────────────────────
 void shiftWrite(uint16_t val) {
@@ -85,15 +84,15 @@ int fireNextOutput(uint32_t pulseDurationMs) {
   for (int tries = 0; tries < 16; tries++) {
     int q = nextOutput;
     nextOutput = (nextOutput + 1) % 16;
-    if (usedOutputs & (1 << q)) continue;
+    if (usedOutputs & (uint16_t)(1u << q)) continue;
 
-    shiftWrite((uint16_t)(1 << q));
+    shiftWrite((uint16_t)(1u << q));
     delayMicroseconds(500);
 
     int raw = analogRead(PIN_CURRENT);
     if (raw < 10) {
       shiftWrite(0);
-      usedOutputs |= (1 << q);
+      usedOutputs |= (uint16_t)(1u << q);
       DPRINT("Output Q"); DPRINT(q); DPRINTLN(" dead (no current) — skipped");
       continue;
     }
@@ -194,9 +193,13 @@ void handlePulse() {
 }
 
 void handleState() {
-  String json = "{\"active\":" + String(activeQ) +
-                ",\"pulse\":"  + (pulseActive ? "true" : "false") +
-                ",\"pulseQ\":" + String(pulseActive ? pulseQ : -1) + "}";
+  String json = "{\"active\":"    + String(activeQ) +
+                ",\"pulse\":"     + (pulseActive ? "true" : "false") +
+                ",\"pulseQ\":"   + String(pulseActive ? pulseQ : -1) +
+                ",\"used\":"     + String(usedOutputs) +
+                ",\"twitch\":"   + (twitchConnected ? "true" : "false") +
+                ",\"bitsThresh\":" + String(bitsThreshold) +
+                ",\"pulseDurMs\":" + String(pulseDurMs) + "}";
   sendJSON(200, json);
 }
 
@@ -264,7 +267,7 @@ void parseTwitchMessage(const String& msg) {
   if (msg.indexOf("bits=") > 0) {
     String bitsStr = extractTag(msg, "bits");
     int bitsCount  = bitsStr.toInt();
-    if (bitsCount >= bitsThreshold) {
+    if (bitsCount > 0 && bitsCount >= bitsThreshold) {
       fireNextOutput(pulseDurMs);
     }
   }
@@ -274,14 +277,18 @@ void parseTwitchMessage(const String& msg) {
 void connectTwitch() {
   DPRINTLN("Connecting to Twitch IRC...");
   twitchClient.setInsecure();
+  prefs.begin("twitch", true);
+  String oauth = prefs.getString("twitch_oauth", TWITCH_OAUTH_SECRET);
+  String nick  = prefs.getString("twitch_nick",  TWITCH_OAUTH_NICK);
+  prefs.end();
   if (twitchClient.connect("irc.chat.twitch.tv", 6697)) {
-    twitchClient.println("PASS " + String(TWITCH_OAUTH_SECRET));
-    twitchClient.println("NICK " + String(TWITCH_OAUTH_NICK));
+    twitchClient.println("PASS " + oauth);
+    twitchClient.println("NICK " + nick);
     twitchClient.println("CAP REQ :twitch.tv/tags twitch.tv/commands");
-    twitchClient.println("JOIN #" TWITCH_CHANNEL);
+    twitchClient.println("JOIN #" + twitchChannel);
     twitchConnected = true;
     lastTwitchPing = millis();
-    DPRINT("Joined #"); DPRINTLN(TWITCH_CHANNEL);
+    DPRINT("Joined #"); DPRINTLN(twitchChannel);
   } else {
     twitchConnected = false;
     DPRINTLN("Twitch connection failed");
@@ -332,11 +339,33 @@ void handleSaveCfg() {
     int ms = server.arg("pulse_ms").toInt();
     if (ms >= 10 && ms <= 30000) pulseDurMs = ms;
   }
+  if (server.hasArg("channel")) {
+    String ch = server.arg("channel");
+    ch.trim();
+    if (ch.length() > 0) twitchChannel = ch;
+  }
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
   prefs.putUInt("pulseDurMs",  pulseDurMs);
+  prefs.putString("channel",    twitchChannel);
+  if (server.hasArg("oauth")) {
+    String oa = server.arg("oauth");
+    if (oa.length() > 0) prefs.putString("twitch_oauth", oa);
+  }
+  if (server.hasArg("nick")) {
+    String nk = server.arg("nick");
+    if (nk.length() > 0) prefs.putString("twitch_nick", nk);
+  }
   prefs.end();
-  sendJSON(200, "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + "}");
+  sendJSON(200, "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"channel\":\"" + twitchChannel + "\"}");
+}
+
+void handleGetCfg() {
+  String json = "{\"bitsThreshold\":" + String(bitsThreshold) +
+                ",\"pulseDurMs\":"   + String(pulseDurMs) +
+                ",\"twitchConnected\":" + (twitchConnected ? "true" : "false") +
+                ",\"channel\":\""    + twitchChannel + "\"}";
+  sendJSON(200, json);
 }
 
 // ── OTA ───────────────────────────────────────
@@ -371,6 +400,8 @@ void setup() {
   // Enable 595 outputs after init is complete
   digitalWrite(PIN_OE, LOW);
 
+  pinMode(PIN_CURRENT, INPUT);
+
   prefs.begin("wifi", true);
   String savedSSID = prefs.getString("ssid", MYSSID);
   String savedPSK  = prefs.getString("psk",  MYPSK);
@@ -387,12 +418,14 @@ void setup() {
       DPRINTLN("mDNS: http://" HOSTNAME ".local");
     }
     setupOTA();
-    connectTwitch();
 
     prefs.begin("twitch", true);
     bitsThreshold = prefs.getInt("bitsThreshold", 100);
     pulseDurMs   = prefs.getUInt("pulseDurMs",   500);
+    twitchChannel = prefs.getString("channel", "daverdavid");
     prefs.end();
+
+    connectTwitch();
   }
 
   server.on("/",         handleRoot);
@@ -403,6 +436,7 @@ void setup() {
   server.on("/resetused",  handleResetUsed);
   server.on("/used",       handleUsed);
   server.on("/savecfg",    handleSaveCfg);
+  server.on("/getcfg",     handleGetCfg);
   server.onNotFound(     handleNotFound);
   server.begin();
   DPRINTLN("HTTP server started");
