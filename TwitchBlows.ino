@@ -20,7 +20,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
-#include "Secrets.h"
+#include <Secrets.h>
 #include "html.h"
 
 // ── Configuration ─────────────────────────────
@@ -38,7 +38,7 @@
 
 #define PIN_CURRENT   A0   // Analog pin for current sense
 
-#define TWITCH_CHANNEL "yourchannel"   // set your Twitch channel here
+#define TWITCH_CHANNEL "daverdavid"   // set your Twitch channel here
 
 // ── Globals ───────────────────────────────────
 WebServer   server(80);
