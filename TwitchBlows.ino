@@ -54,6 +54,8 @@ uint32_t pulseEnd    = 0;
 // Output tracking
 uint16_t usedOutputs = 0;       // bitmask: bit N=1 means output N is dead/used
 int      nextOutput  = 0;       // rolling pointer for next untried output
+int      channelPeak[16] = {0}; // last measured ADC peak per channel
+int8_t  pendingUsedQ = -1;     // channel to mark used when pulse ends
 
 // Twitch IRC
 WiFiClientSecure twitchClient;
@@ -115,7 +117,7 @@ void shiftWrite(uint16_t val) {
 void setOutput(int8_t q) {
   activeQ = q;
   shiftWrite((q >= 0) ? (uint16_t)(1 << q) : 0);
-  DPRINT("Output set to Q"); DPRINTLN(q);
+  webLog("[TOGGLE] Ch" + String(q+1) + " " + (q >= 0 ? "ON" : "OFF"));
 }
 
 // ── Single-output enforcer ────────────────────
@@ -124,6 +126,16 @@ void clearAllOutputs() {
   pulseActive = false;
   pulseQ      = -1;
   activeQ     = -1;
+}
+
+// ── Safe pulse: guaranteed single-output, always-off-after ─
+void safePulse(int8_t q, uint32_t ms) {
+  clearAllOutputs();
+  if (q < 0 || q > 15) return;
+  shiftWrite((uint16_t)(1u << q));
+  pulseActive = true;
+  pulseQ      = q;
+  pulseEnd    = millis() + ms;
 }
 
 // ── Fire next live output with current sensing ─
@@ -135,33 +147,38 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     nextOutput = (nextOutput + 1) % 16;
 
     if (usedOutputs & (uint16_t)(1u << q)) {
-      webLog("[FIRE] Q" + String(q) + " already used — skip");
+      webLog("[FIRE] Ch" + String(q+1) + " already used — skip");
       continue;
     }
 
     shiftWrite((uint16_t)(1u << q));
-    webLog("[FIRE] Q" + String(q) + " — firing output...");
+    webLog("[FIRE] Ch" + String(q+1) + " — firing output...");
 
+    // Sample ADC for peak over the sense window
+    int peakRaw = 0;
     if (currentThreshold > 0) {
-      delay(currentSenseDelayMs);
-      int raw = analogRead(PIN_CURRENT);
-      webLog("[SENSE] Q" + String(q) + " ADC=" + String(raw) + " threshold=" + String(currentThreshold));
+      uint32_t senseStart = millis();
+      while (millis() - senseStart < currentSenseDelayMs) {
+        int raw = analogRead(PIN_CURRENT);
+        if (raw > peakRaw) peakRaw = raw;
+      }
+      channelPeak[q] = peakRaw;
+      webLog("[SENSE] Ch" + String(q+1) + " peak=" + String(peakRaw) + " thresh=" + String(currentThreshold));
 
-      if (raw < currentThreshold) {
+      if (peakRaw < currentThreshold) {
         shiftWrite(0);
         usedOutputs |= (uint16_t)(1u << q);
-        webLog("[FIRE] Q" + String(q) + " DEAD — skipping");
+        webLog("[FIRE] Ch" + String(q+1) + " DEAD — skipping");
         continue;
       }
     } else {
-      webLog("[SENSE] Q" + String(q) + " — sense DISABLED, assuming live");
+      webLog("[SENSE] Ch" + String(q+1) + " — sense DISABLED, assuming live");
     }
 
-    activeQ     = (int8_t)q;
-    pulseActive = true;
-    pulseQ      = (int8_t)q;
-    pulseEnd    = millis() + pulseDurationMs;
-    webLog("[FIRE] Q" + String(q) + " CONFIRMED LIVE — firing " + String(pulseDurationMs) + "ms");
+    // Use safePulse for guaranteed single-output, always-off-after
+    safePulse(q, pulseDurationMs);
+    pendingUsedQ = q;
+    webLog("[FIRE] Ch" + String(q+1) + " CONFIRMED LIVE — firing " + String(pulseDurationMs) + "ms");
     return q;
   }
 
@@ -244,12 +261,11 @@ void handlePulse() {
 
   clearAllOutputs();
   shiftWrite((uint16_t)(1u << q));
-  activeQ     = (int8_t)q;
   pulseActive = true;
   pulseQ      = (int8_t)q;
   pulseEnd    = millis() + (uint32_t)ms;
 
-  DPRINT("Pulse Q"); DPRINT(q); DPRINT(" for "); DPRINT(ms); DPRINTLN("ms");
+  webLog("[PULSE] Ch" + String(q+1) + " for " + String(ms) + "ms");
 
   sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"ms\":" + String(ms) + "}");
 }
@@ -262,7 +278,13 @@ void handleState() {
                 ",\"twitch\":"   + (twitchConnected ? "true" : "false") +
                 ",\"bitsThresh\":" + String(bitsThreshold) +
                 ",\"pulseDurMs\":" + String(pulseDurMs) +
-                ",\"nextQ\":"   + String(nextOutput) + "}";
+                ",\"nextQ\":"   + String(nextOutput) +
+                ",\"peaks\":[";
+  for (int i = 0; i < 16; i++) {
+    json += String(channelPeak[i]);
+    if (i < 15) json += ",";
+  }
+  json += "]}";
   sendJSON(200, json);
 }
 
@@ -497,18 +519,19 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"bitsThreshold\":" + String(bitsThreshold) +
-                ",\"pulseDurMs\":"   + String(pulseDurMs) +
-                ",\"csThresh\":"    + String(currentThreshold) +
-                ",\"csDelayMs\":"   + String(currentSenseDelayMs) +
-                ",\"twitchConnected\":" + (twitchConnected ? "true" : "false") +
-                ",\"channel\":\""    + twitchChannel +
-                ",\"evBits\":"     + (evBitsEnabled ? "true" : "false") +
-                ",\"evPoints\":"  + (evPointsEnabled ? "true" : "false") +
-                ",\"evSubs\":"    + (evSubsEnabled ? "true" : "false") +
-                ",\"evRaids\":"   + (evRaidsEnabled ? "true" : "false") +
-                ",\"ptsFilter\":\"" + pointsRewardFilter + "\"" +
-                ",\"nextQ\":"     + String(nextOutput) + "}";
+  String json = "{\"ok\":true," +
+               "\"bitsThreshold\":" + String(bitsThreshold) + "," +
+               "\"pulseDurMs\":"   + String(pulseDurMs) + "," +
+               "\"csThresh\":"    + String(currentThreshold) + "," +
+               "\"csDelayMs\":"   + String(currentSenseDelayMs) + "," +
+               "\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + "," +
+               "\"channel\":\""    + twitchChannel + "\"," +
+               "\"evBits\":"     + String(evBitsEnabled ? "true" : "false") + "," +
+               "\"evPoints\":"  + String(evPointsEnabled ? "true" : "false") + "," +
+               "\"evSubs\":"    + String(evSubsEnabled ? "true" : "false") + "," +
+               "\"evRaids\":"   + String(evRaidsEnabled ? "true" : "false") + "," +
+               "\"ptsFilter\":\"" + pointsRewardFilter + "\"," +
+               "\"nextQ\":"     + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
@@ -604,7 +627,12 @@ void loop() {
       shiftWrite(0);
       pulseActive = false;
       pulseQ      = -1;
-      DPRINTLN("Pulse ended — output OFF");
+      if (pendingUsedQ >= 0) {
+        usedOutputs |= (uint16_t)(1u << pendingUsedQ);
+        webLog("[USED] Ch" + String(pendingUsedQ+1) + " marked dead after fire");
+        pendingUsedQ = -1;
+      }
+      webLog("[PULSE] ended — output OFF");
     }
 
     // Twitch IRC polling with auto-reconnect

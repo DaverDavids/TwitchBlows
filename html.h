@@ -678,9 +678,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const btn = document.createElement('button');
     btn.className = 'output-btn';
     btn.id = 'btn' + i;
-    btn.setAttribute('aria-label', 'Output Q' + i);
+    btn.setAttribute('aria-label', 'Channel ' + (i+1));
     btn.innerHTML =
-      '<span class="q-label">Q' + i + '</span>' +
+      '<span class="q-label">Ch' + (i+1) + '</span>' +
       '<span class="q-sub" id="sub' + i + '">&#8212;</span>';
     btn.onclick = () => handleBtnClick(i);
     grid.appendChild(btn);
@@ -840,6 +840,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         usedMask  = data.used || 0;
         twitchConn = data.twitch === true || data.twitch === 'true';
         nextQ    = data.nextQ || 0;
+
+        // Update peak ADC values in button sub-labels
+        if (data.peaks) {
+          for (let i = 0; i < 16; i++) {
+            const sub = document.getElementById('sub' + i);
+            if (sub && data.peaks[i] > 0 && !sub.textContent.includes('ON')) {
+              sub.textContent = data.peaks[i];
+            }
+          }
+        }
 
         updateToggleUI();
         updateDeadUI();
