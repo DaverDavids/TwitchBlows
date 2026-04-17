@@ -358,6 +358,49 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     #status-text { font-size: 0.8rem; color: var(--muted); font-family: var(--font-mono); }
 
+    /* ── Console ── */
+    .console {
+      width: 100%; max-width: 560px;
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: #7ee787;
+      height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .console-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%; max-width: 560px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .console-header button {
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .console-header button:hover {
+      background: var(--surface);
+      color: var(--text);
+    }
+
     /* ── Config section ── */
     #config-section {
       width: 100%; max-width: 560px;
@@ -531,6 +574,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="status-dot" id="status-dot"></div>
   <span id="status-text">Loading&#8230;</span>
 </div>
+
+<div class="console-header">
+  <span>&#9679; Device Console</span>
+  <button onclick="clearConsole()">Clear</button>
+</div>
+<div class="console" id="console">Connecting...</div>
 
 <div id="config-section">
   <div class="cfg-title">TwitchBlows Config</div>
@@ -863,9 +912,31 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       .catch(() => setStatusText('Error saving config'));
   }
 
+  // ── Console polling ───────────────────────────
+  let consoleSeen = '';
+  function pollLog() {
+    fetch('/log')
+      .then(r => r.text())
+      .then(txt => {
+        if (txt !== consoleSeen) {
+          consoleSeen = txt;
+          const el = document.getElementById('console');
+          el.textContent = txt;
+          el.scrollTop = el.scrollHeight;
+        }
+      })
+      .catch(() => {});
+  }
+  function clearConsole() {
+    document.getElementById('console').textContent = '';
+    consoleSeen = '';
+  }
+
   // ── Init ──────────────────────────────────
   pollState();
+  pollLog();
   setInterval(pollState, 3000);
+  setInterval(pollLog, 1000);
 </script>
 </body>
 </html>

@@ -66,7 +66,7 @@ uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
 String  twitchChannel = "daverdavid";  // loaded from prefs
 
 // Current sense config
-int      currentThreshold  = 10;    // ADC raw value (0–4095) to confirm output is live
+int      currentThreshold  = 0;    // 0 = DISABLED (set >0 to enable)
 uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
 
 // Event enable flags
@@ -77,6 +77,32 @@ bool evRaidsEnabled  = false;
 
 // Channel points reward ID filter (empty = trigger on ALL redemptions)
 String pointsRewardFilter = "";
+
+// ── Web console log buffer ─────────────────────
+#define LOG_LINES 40
+#define LOG_WIDTH 120
+char logBuf[LOG_LINES][LOG_WIDTH];
+int  logHead = 0;
+int  logCount = 0;
+
+void webLog(const String& msg) {
+  DPRINTLN(msg);
+  msg.toCharArray(logBuf[logHead], LOG_WIDTH - 1);
+  logBuf[logHead][LOG_WIDTH - 1] = '\0';
+  logHead = (logHead + 1) % LOG_LINES;
+  if (logCount < LOG_LINES) logCount++;
+}
+
+void handleLog() {
+  String out = "";
+  int start = (logCount < LOG_LINES) ? 0 : logHead;
+  for (int i = 0; i < min(logCount, LOG_LINES); i++) {
+    int idx = (start + i) % LOG_LINES;
+    out += String(logBuf[idx]) + "\n";
+  }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "text/plain", out);
+}
 
 // ── 595 helper ────────────────────────────────
 void shiftWrite(uint16_t val) {
@@ -109,35 +135,37 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     nextOutput = (nextOutput + 1) % 16;
 
     if (usedOutputs & (uint16_t)(1u << q)) {
-      DPRINT("[FIRE] Q"); DPRINT(q); DPRINTLN(" already used — skip");
+      webLog("[FIRE] Q" + String(q) + " already used — skip");
       continue;
     }
 
     shiftWrite((uint16_t)(1u << q));
-    DPRINT("[FIRE] Q"); DPRINT(q); DPRINTLN(" — waiting for current...");
+    webLog("[FIRE] Q" + String(q) + " — firing output...");
 
-    delay(currentSenseDelayMs);
-    int raw = analogRead(PIN_CURRENT);
-    DPRINT("[SENSE] Q"); DPRINT(q); DPRINT(" ADC="); DPRINT(raw);
-    DPRINT(" threshold="); DPRINTLN(currentThreshold);
+    if (currentThreshold > 0) {
+      delay(currentSenseDelayMs);
+      int raw = analogRead(PIN_CURRENT);
+      webLog("[SENSE] Q" + String(q) + " ADC=" + String(raw) + " threshold=" + String(currentThreshold));
 
-    if (raw < currentThreshold) {
-      shiftWrite(0);
-      usedOutputs |= (uint16_t)(1u << q);
-      DPRINT("[FIRE] Q"); DPRINT(q); DPRINTLN(" DEAD (no current) — skipping");
-      continue;
+      if (raw < currentThreshold) {
+        shiftWrite(0);
+        usedOutputs |= (uint16_t)(1u << q);
+        webLog("[FIRE] Q" + String(q) + " DEAD — skipping");
+        continue;
+      }
+    } else {
+      webLog("[SENSE] Q" + String(q) + " — sense DISABLED, assuming live");
     }
 
     activeQ     = (int8_t)q;
     pulseActive = true;
     pulseQ      = (int8_t)q;
     pulseEnd    = millis() + pulseDurationMs;
-    DPRINT("[FIRE] Q"); DPRINT(q); DPRINT(" CONFIRMED LIVE — firing for ");
-    DPRINT(pulseDurationMs); DPRINTLN("ms");
+    webLog("[FIRE] Q" + String(q) + " CONFIRMED LIVE — firing " + String(pulseDurationMs) + "ms");
     return q;
   }
 
-  DPRINTLN("[FIRE] All 16 outputs exhausted");
+  webLog("[FIRE] All 16 outputs exhausted");
   clearAllOutputs();
   return -1;
 }
@@ -305,53 +333,46 @@ void parseTwitchMessage(const String& msg) {
   String rewardId = extractTag(msg, "custom-reward-id");
 
   if (bitsStr.length() > 0 && bitsStr != "0") {
-    DPRINT("[IRC] BITS event — user="); DPRINT(user);
-    DPRINT(" bits="); DPRINTLN(bitsStr);
+    webLog("[IRC] BITS event — user=" + user + " bits=" + bitsStr);
   }
   if (rewardId.length() > 0) {
-    DPRINT("[IRC] CHANNEL POINTS — user="); DPRINT(user);
-    DPRINT(" reward-id="); DPRINTLN(rewardId);
+    webLog("[IRC] CHANNEL POINTS — user=" + user + " reward-id=" + rewardId);
   }
   if (msgId == "sub" || msgId == "resub" || msgId == "subgift") {
-    DPRINT("[IRC] SUB event — user="); DPRINT(user);
-    DPRINT(" msg-id="); DPRINTLN(msgId);
+    webLog("[IRC] SUB event — user=" + user + " msg-id=" + msgId);
   }
   if (msgId == "raid") {
-    DPRINT("[IRC] RAID event — user="); DPRINTLN(user);
+    webLog("[IRC] RAID event — user=" + user);
   }
   if (bitsStr.length() == 0 && rewardId.length() == 0 && msgId.length() == 0) {
-    DPRINT("[IRC] CHAT msg — user="); DPRINT(user);
-    DPRINT(" msg="); DPRINTLN(extractIRCMessage(msg));
+    webLog("[IRC] CHAT msg — user=" + user + " msg=" + extractIRCMessage(msg));
   }
 
   // Trigger logic
   if (evBitsEnabled && bitsStr.length() > 0) {
     int bitsCount = bitsStr.toInt();
     if (bitsCount > 0 && bitsCount >= bitsThreshold) {
-      DPRINT("[TRIGGER] BITS threshold met ("); DPRINT(bitsCount);
-      DPRINTLN(") — firing output");
+      webLog("[TRIGGER] BITS (" + String(bitsCount) + ") >= " + String(bitsThreshold) + " — firing output");
       fireNextOutput(pulseDurMs);
     }
   }
 
   if (evPointsEnabled && rewardId.length() > 0) {
     if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
-      DPRINT("[TRIGGER] CHANNEL POINTS redeemed by "); DPRINT(user);
-      DPRINT(" (reward="); DPRINT(rewardId); DPRINTLN(") — firing output");
+      webLog("[TRIGGER] CHANNEL POINTS by " + user + " — firing output");
       fireNextOutput(pulseDurMs);
     } else {
-      DPRINT("[IRC] Channel points reward "); DPRINT(rewardId);
-      DPRINTLN(" does not match filter — ignored");
+      webLog("[IRC] Channel points reward " + rewardId + " does not match filter — ignored");
     }
   }
 
   if (evSubsEnabled && (msgId == "sub" || msgId == "resub" || msgId == "subgift")) {
-    DPRINT("[TRIGGER] SUB by "); DPRINT(user); DPRINTLN(" — firing output");
+    webLog("[TRIGGER] SUB by " + user + " — firing output");
     fireNextOutput(pulseDurMs);
   }
 
   if (evRaidsEnabled && msgId == "raid") {
-    DPRINT("[TRIGGER] RAID from "); DPRINT(user); DPRINTLN(" — firing output");
+    webLog("[TRIGGER] RAID from " + user + " — firing output");
     fireNextOutput(pulseDurMs);
   }
 }
@@ -386,7 +407,7 @@ void handleTwitchIRC() {
     if (line.length() == 0) continue;
 
     if (!line.startsWith("PING") && !line.startsWith(":tmi.twitch.tv 00")) {
-      DPRINT("[IRC RAW] "); DPRINTLN(line);
+      webLog("[IRC] " + line);
     }
 
     if (line.startsWith("PING")) {
@@ -567,6 +588,7 @@ void setup() {
   server.on("/used",       handleUsed);
   server.on("/savecfg",    handleSaveCfg);
   server.on("/getcfg",     handleGetCfg);
+  server.on("/log",       handleLog);
   server.onNotFound(     handleNotFound);
   server.begin();
   DPRINTLN("HTTP server started");
