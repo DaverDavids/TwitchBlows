@@ -65,6 +65,19 @@ int     bitsThreshold = 100;    // bits needed to trigger one output
 uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
 String  twitchChannel = "daverdavid";  // loaded from prefs
 
+// Current sense config
+int      currentThreshold  = 10;    // ADC raw value (0–4095) to confirm output is live
+uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
+
+// Event enable flags
+bool evBitsEnabled   = true;
+bool evPointsEnabled = true;
+bool evSubsEnabled   = false;
+bool evRaidsEnabled  = false;
+
+// Channel points reward ID filter (empty = trigger on ALL redemptions)
+String pointsRewardFilter = "";
+
 // ── 595 helper ────────────────────────────────
 void shiftWrite(uint16_t val) {
   digitalWrite(PIN_LATCH, LOW);
@@ -79,32 +92,53 @@ void setOutput(int8_t q) {
   DPRINT("Output set to Q"); DPRINTLN(q);
 }
 
-// Fire next unused output, sense current, mark dead if no response
+// ── Single-output enforcer ────────────────────
+void clearAllOutputs() {
+  shiftWrite(0);
+  pulseActive = false;
+  pulseQ      = -1;
+  activeQ     = -1;
+}
+
+// ── Fire next live output with current sensing ─
 int fireNextOutput(uint32_t pulseDurationMs) {
+  clearAllOutputs();
+
   for (int tries = 0; tries < 16; tries++) {
     int q = nextOutput;
     nextOutput = (nextOutput + 1) % 16;
-    if (usedOutputs & (uint16_t)(1u << q)) continue;
 
-    shiftWrite((uint16_t)(1u << q));
-    delayMicroseconds(500);
-
-    int raw = analogRead(PIN_CURRENT);
-    if (raw < 10) {
-      shiftWrite(0);
-      usedOutputs |= (uint16_t)(1u << q);
-      DPRINT("Output Q"); DPRINT(q); DPRINTLN(" dead (no current) — skipped");
+    if (usedOutputs & (uint16_t)(1u << q)) {
+      DPRINT("[FIRE] Q"); DPRINT(q); DPRINTLN(" already used — skip");
       continue;
     }
 
+    shiftWrite((uint16_t)(1u << q));
+    DPRINT("[FIRE] Q"); DPRINT(q); DPRINTLN(" — waiting for current...");
+
+    delay(currentSenseDelayMs);
+    int raw = analogRead(PIN_CURRENT);
+    DPRINT("[SENSE] Q"); DPRINT(q); DPRINT(" ADC="); DPRINT(raw);
+    DPRINT(" threshold="); DPRINTLN(currentThreshold);
+
+    if (raw < currentThreshold) {
+      shiftWrite(0);
+      usedOutputs |= (uint16_t)(1u << q);
+      DPRINT("[FIRE] Q"); DPRINT(q); DPRINTLN(" DEAD (no current) — skipping");
+      continue;
+    }
+
+    activeQ     = (int8_t)q;
     pulseActive = true;
-    pulseQ       = (int8_t)q;
-    pulseEnd     = millis() + pulseDurationMs;
-    DPRINT("Fired Q"); DPRINTLN(q);
+    pulseQ      = (int8_t)q;
+    pulseEnd    = millis() + pulseDurationMs;
+    DPRINT("[FIRE] Q"); DPRINT(q); DPRINT(" CONFIRMED LIVE — firing for ");
+    DPRINT(pulseDurationMs); DPRINTLN("ms");
     return q;
   }
-  DPRINTLN("All 16 outputs used/dead");
-  shiftWrite(0);
+
+  DPRINTLN("[FIRE] All 16 outputs exhausted");
+  clearAllOutputs();
   return -1;
 }
 
@@ -153,8 +187,7 @@ void handleRoot() {
 }
 
 void handleSet() {
-  pulseActive = false;
-  pulseQ      = -1;
+  clearAllOutputs();
 
   if (server.hasArg("q")) {
     int q = server.arg("q").toInt();
@@ -181,8 +214,9 @@ void handlePulse() {
   if (ms < 10)    ms = 10;
   if (ms > 30000) ms = 30000;
 
-  activeQ = -1;
-  shiftWrite((uint16_t)(1 << q));
+  clearAllOutputs();
+  shiftWrite((uint16_t)(1u << q));
+  activeQ     = (int8_t)q;
   pulseActive = true;
   pulseQ      = (int8_t)q;
   pulseEnd    = millis() + (uint32_t)ms;
@@ -199,7 +233,8 @@ void handleState() {
                 ",\"used\":"     + String(usedOutputs) +
                 ",\"twitch\":"   + (twitchConnected ? "true" : "false") +
                 ",\"bitsThresh\":" + String(bitsThreshold) +
-                ",\"pulseDurMs\":" + String(pulseDurMs) + "}";
+                ",\"pulseDurMs\":" + String(pulseDurMs) +
+                ",\"nextQ\":"   + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
@@ -264,12 +299,60 @@ String extractTag(const String& line, const String& tagName) {
 }
 
 void parseTwitchMessage(const String& msg) {
-  if (msg.indexOf("bits=") > 0) {
-    String bitsStr = extractTag(msg, "bits");
-    int bitsCount  = bitsStr.toInt();
+  String msgId   = extractTag(msg, "msg-id");
+  String user    = extractTag(msg, "display-name");
+  String bitsStr = extractTag(msg, "bits");
+  String rewardId = extractTag(msg, "custom-reward-id");
+
+  if (bitsStr.length() > 0 && bitsStr != "0") {
+    DPRINT("[IRC] BITS event — user="); DPRINT(user);
+    DPRINT(" bits="); DPRINTLN(bitsStr);
+  }
+  if (rewardId.length() > 0) {
+    DPRINT("[IRC] CHANNEL POINTS — user="); DPRINT(user);
+    DPRINT(" reward-id="); DPRINTLN(rewardId);
+  }
+  if (msgId == "sub" || msgId == "resub" || msgId == "subgift") {
+    DPRINT("[IRC] SUB event — user="); DPRINT(user);
+    DPRINT(" msg-id="); DPRINTLN(msgId);
+  }
+  if (msgId == "raid") {
+    DPRINT("[IRC] RAID event — user="); DPRINTLN(user);
+  }
+  if (bitsStr.length() == 0 && rewardId.length() == 0 && msgId.length() == 0) {
+    DPRINT("[IRC] CHAT msg — user="); DPRINT(user);
+    DPRINT(" msg="); DPRINTLN(extractIRCMessage(msg));
+  }
+
+  // Trigger logic
+  if (evBitsEnabled && bitsStr.length() > 0) {
+    int bitsCount = bitsStr.toInt();
     if (bitsCount > 0 && bitsCount >= bitsThreshold) {
+      DPRINT("[TRIGGER] BITS threshold met ("); DPRINT(bitsCount);
+      DPRINTLN(") — firing output");
       fireNextOutput(pulseDurMs);
     }
+  }
+
+  if (evPointsEnabled && rewardId.length() > 0) {
+    if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
+      DPRINT("[TRIGGER] CHANNEL POINTS redeemed by "); DPRINT(user);
+      DPRINT(" (reward="); DPRINT(rewardId); DPRINTLN(") — firing output");
+      fireNextOutput(pulseDurMs);
+    } else {
+      DPRINT("[IRC] Channel points reward "); DPRINT(rewardId);
+      DPRINTLN(" does not match filter — ignored");
+    }
+  }
+
+  if (evSubsEnabled && (msgId == "sub" || msgId == "resub" || msgId == "subgift")) {
+    DPRINT("[TRIGGER] SUB by "); DPRINT(user); DPRINTLN(" — firing output");
+    fireNextOutput(pulseDurMs);
+  }
+
+  if (evRaidsEnabled && msgId == "raid") {
+    DPRINT("[TRIGGER] RAID from "); DPRINT(user); DPRINTLN(" — firing output");
+    fireNextOutput(pulseDurMs);
   }
 }
 
@@ -300,6 +383,12 @@ void handleTwitchIRC() {
   while (twitchClient.available()) {
     String line = twitchClient.readStringUntil('\n');
     line.trim();
+    if (line.length() == 0) continue;
+
+    if (!line.startsWith("PING") && !line.startsWith(":tmi.twitch.tv 00")) {
+      DPRINT("[IRC RAW] "); DPRINTLN(line);
+    }
+
     if (line.startsWith("PING")) {
       twitchClient.println("PONG :tmi.twitch.tv");
       lastTwitchPing = millis();
@@ -339,15 +428,41 @@ void handleSaveCfg() {
     int ms = server.arg("pulse_ms").toInt();
     if (ms >= 10 && ms <= 30000) pulseDurMs = ms;
   }
+  if (server.hasArg("cs_threshold")) {
+    currentThreshold = server.arg("cs_threshold").toInt();
+    if (currentThreshold < 1) currentThreshold = 1;
+    if (currentThreshold > 4095) currentThreshold = 4095;
+  }
+  if (server.hasArg("cs_delay_ms")) {
+    int d = server.arg("cs_delay_ms").toInt();
+    if (d >= 1 && d <= 500) currentSenseDelayMs = d;
+  }
   if (server.hasArg("channel")) {
     String ch = server.arg("channel");
     ch.trim();
     if (ch.length() > 0) twitchChannel = ch;
   }
+  if (server.hasArg("ev_bits"))   evBitsEnabled   = server.arg("ev_bits") == "1";
+  if (server.hasArg("ev_points")) evPointsEnabled = server.arg("ev_points") == "1";
+  if (server.hasArg("ev_subs"))   evSubsEnabled   = server.arg("ev_subs") == "1";
+  if (server.hasArg("ev_raids"))  evRaidsEnabled  = server.arg("ev_raids") == "1";
+  if (server.hasArg("pts_filter")) {
+    String pf = server.arg("pts_filter");
+    pf.trim();
+    pointsRewardFilter = pf;
+  }
+
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
   prefs.putUInt("pulseDurMs",  pulseDurMs);
-  prefs.putString("channel",    twitchChannel);
+  prefs.putInt("csThresh",    currentThreshold);
+  prefs.putUInt("csDelayMs",  currentSenseDelayMs);
+  prefs.putString("channel",   twitchChannel);
+  prefs.putBool("evBits",    evBitsEnabled);
+  prefs.putBool("evPoints",  evPointsEnabled);
+  prefs.putBool("evSubs",    evSubsEnabled);
+  prefs.putBool("evRaids",   evRaidsEnabled);
+  prefs.putString("ptsFilter", pointsRewardFilter);
   if (server.hasArg("oauth")) {
     String oa = server.arg("oauth");
     if (oa.length() > 0) prefs.putString("twitch_oauth", oa);
@@ -357,14 +472,22 @@ void handleSaveCfg() {
     if (nk.length() > 0) prefs.putString("twitch_nick", nk);
   }
   prefs.end();
-  sendJSON(200, "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"channel\":\"" + twitchChannel + "\"}");
+  sendJSON(200, "{\"ok\":true}");
 }
 
 void handleGetCfg() {
   String json = "{\"bitsThreshold\":" + String(bitsThreshold) +
                 ",\"pulseDurMs\":"   + String(pulseDurMs) +
+                ",\"csThresh\":"    + String(currentThreshold) +
+                ",\"csDelayMs\":"   + String(currentSenseDelayMs) +
                 ",\"twitchConnected\":" + (twitchConnected ? "true" : "false") +
-                ",\"channel\":\""    + twitchChannel + "\"}";
+                ",\"channel\":\""    + twitchChannel +
+                ",\"evBits\":"     + (evBitsEnabled ? "true" : "false") +
+                ",\"evPoints\":"  + (evPointsEnabled ? "true" : "false") +
+                ",\"evSubs\":"    + (evSubsEnabled ? "true" : "false") +
+                ",\"evRaids\":"   + (evRaidsEnabled ? "true" : "false") +
+                ",\"ptsFilter\":\"" + pointsRewardFilter + "\"" +
+                ",\"nextQ\":"     + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
@@ -422,7 +545,14 @@ void setup() {
     prefs.begin("twitch", true);
     bitsThreshold = prefs.getInt("bitsThreshold", 100);
     pulseDurMs   = prefs.getUInt("pulseDurMs",   500);
+    currentThreshold = prefs.getInt("csThresh", 10);
+    currentSenseDelayMs = prefs.getUInt("csDelayMs", 10);
     twitchChannel = prefs.getString("channel", "daverdavid");
+    evBitsEnabled   = prefs.getBool("evBits",   true);
+    evPointsEnabled = prefs.getBool("evPoints", true);
+    evSubsEnabled   = prefs.getBool("evSubs",   false);
+    evRaidsEnabled  = prefs.getBool("evRaids",  false);
+    pointsRewardFilter = prefs.getString("ptsFilter", "");
     prefs.end();
 
     connectTwitch();

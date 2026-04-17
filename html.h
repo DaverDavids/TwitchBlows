@@ -267,6 +267,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
     .output-btn.dead::before { background: var(--red); opacity: 0.5; }
 
+    .output-btn.next::after {
+      content: '\\25B6';
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      font-size: 0.6rem;
+      color: var(--green);
+      font-weight: 700;
+    }
+
     @keyframes pulse-glow {
       from { box-shadow: 0 0 8px var(--amber-dim); }
       to   { box-shadow: 0 0 22px var(--amber); }
@@ -551,11 +561,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <div class="cfg-row-inline">
+    <div class="cfg-row">
+      <label for="cfg-cs-thresh">Current Sense Threshold</label>
+      <input type="number" id="cfg-cs-thresh" value="10" min="1" max="4095" step="1">
+    </div>
+    <div class="cfg-row">
+      <label for="cfg-cs-delay">Current Sense Delay (ms)</label>
+      <input type="number" id="cfg-cs-delay" value="10" min="1" max="500" step="1">
+    </div>
+  </div>
+
+  <div class="cfg-row">
+    <label for="cfg-pts-filter">Points Reward ID Filter (blank = all)</label>
+    <input type="text" id="cfg-pts-filter" placeholder="e.g. a1b2c3d4-e5f6-...">
+  </div>
+
   <div class="cfg-checkboxes">
-    <label><input type="checkbox" id="cb-bits"   checked> Bits</label>
-    <label><input type="checkbox" id="cb-subs"   disabled> Subs</label>
-    <label><input type="checkbox" id="cb-points" disabled> Channel Points</label>
-    <label><input type="checkbox" id="cb-raids"  disabled> Raids</label>
+    <label><input type="checkbox" id="cb-bits"> Bits</label>
+    <label><input type="checkbox" id="cb-points"> Channel Points</label>
+    <label><input type="checkbox" id="cb-subs"> Subs</label>
+    <label><input type="checkbox" id="cb-raids"> Raids</label>
   </div>
 
   <div class="cfg-actions">
@@ -595,6 +621,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let pulseBars   = {};
   let usedMask    = 0;
   let twitchConn  = false;
+  let nextQ      = 0;
 
   // ── Build buttons ─────────────────────────
   const grid = document.getElementById('grid');
@@ -720,6 +747,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
   }
 
+  // ── Next output indicator ─────────────────────
+  function updateNextUI() {
+    for (let i = 0; i < 16; i++) {
+      const btn = document.getElementById('btn' + i);
+      if (btn) {
+        btn.classList.toggle('next', i === nextQ && !btn.classList.contains('dead'));
+      }
+    }
+  }
+
   // ── UI updates ────────────────────────────
   function updateToggleUI() {
     for (let i = 0; i < 16; i++) {
@@ -753,9 +790,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         activeQ   = data.active;
         usedMask  = data.used || 0;
         twitchConn = data.twitch === true || data.twitch === 'true';
+        nextQ    = data.nextQ || 0;
 
         updateToggleUI();
         updateDeadUI();
+        updateNextUI();
         updateStatus();
 
         const td = document.getElementById('twitch-dot');
@@ -775,6 +814,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           document.getElementById('cfg-channel').value = data.channel || '';
           document.getElementById('cfg-bits').value   = data.bitsThreshold || 100;
           document.getElementById('cfg-pulse').value  = data.pulseDurMs || 500;
+          document.getElementById('cfg-cs-thresh').value = data.csThresh || 10;
+          document.getElementById('cfg-cs-delay').value = data.csDelayMs || 10;
+          document.getElementById('cfg-pts-filter').value = data.ptsFilter || '';
+          document.getElementById('cb-bits').checked   = data.evBits === true || data.evBits === 'true';
+          document.getElementById('cb-points').checked = data.evPoints === true || data.evPoints === 'true';
+          document.getElementById('cb-subs').checked   = data.evSubs === true || data.evSubs === 'true';
+          document.getElementById('cb-raids').checked  = data.evRaids === true || data.evRaids === 'true';
           document.getElementById('cfg-oauth').value  = '';
           document.getElementById('cfg-nick').value   = '';
         })
@@ -787,12 +833,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const ch = document.getElementById('cfg-channel').value.trim();
     const bits = document.getElementById('cfg-bits').value;
     const pulse = document.getElementById('cfg-pulse').value;
+    const csThresh = document.getElementById('cfg-cs-thresh').value;
+    const csDelay = document.getElementById('cfg-cs-delay').value;
+    const ptsFilter = document.getElementById('cfg-pts-filter').value.trim();
     const oauth = document.getElementById('cfg-oauth').value.trim();
     const nick = document.getElementById('cfg-nick').value.trim();
 
     if (ch) params.append('channel', ch);
     if (bits) params.append('bits_threshold', bits);
     if (pulse) params.append('pulse_ms', pulse);
+    if (csThresh) params.append('cs_threshold', csThresh);
+    if (csDelay) params.append('cs_delay_ms', csDelay);
+    if (ptsFilter) params.append('pts_filter', ptsFilter);
+    params.append('ev_bits', document.getElementById('cb-bits').checked ? '1' : '0');
+    params.append('ev_points', document.getElementById('cb-points').checked ? '1' : '0');
+    params.append('ev_subs', document.getElementById('cb-subs').checked ? '1' : '0');
+    params.append('ev_raids', document.getElementById('cb-raids').checked ? '1' : '0');
     if (oauth) params.append('oauth', oauth);
     if (nick) params.append('nick', nick);
 
