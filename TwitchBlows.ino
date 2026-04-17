@@ -519,19 +519,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true," +
-               "\"bitsThreshold\":" + String(bitsThreshold) + "," +
-               "\"pulseDurMs\":"   + String(pulseDurMs) + "," +
-               "\"csThresh\":"    + String(currentThreshold) + "," +
-               "\"csDelayMs\":"   + String(currentSenseDelayMs) + "," +
-               "\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + "," +
-               "\"channel\":\""    + twitchChannel + "\"," +
-               "\"evBits\":"     + String(evBitsEnabled ? "true" : "false") + "," +
-               "\"evPoints\":"  + String(evPointsEnabled ? "true" : "false") + "," +
-               "\"evSubs\":"    + String(evSubsEnabled ? "true" : "false") + "," +
-               "\"evRaids\":"   + String(evRaidsEnabled ? "true" : "false") + "," +
-               "\"ptsFilter\":\"" + pointsRewardFilter + "\"," +
-               "\"nextQ\":"     + String(nextOutput) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csThresh\":" + String(currentThreshold) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
