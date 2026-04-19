@@ -43,7 +43,7 @@
 #define CS_MV_PER_AMP    064.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_ADC_REF_V      3.3f    // ADC reference voltage
 #define CS_ADC_BITS      4095    // 12-bit ADC max count
-#define CS_DETECT_AMPS  1.9f    // minimum current (A) to count as live output
+#define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
 
 // ── Globals ───────────────────────────────────
 WebServer   server(80);
@@ -71,12 +71,21 @@ unsigned long     lastTwitchPing = 0;
 
 // Twitch trigger config
 int     bitsThreshold = 100;    // bits needed to trigger one output
+int     pointsThreshold = 1;     // min channel points redemptions to trigger
+int     subsThreshold = 1;       // min subs to trigger
+int     raidThreshold = 10;       // min raid viewer count to trigger
 uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
 String  twitchChannel = "daverdavid";  // loaded from prefs
+
+// Event counters
+int pointsRedemptionCount = 0;
+int subCount = 0;
 
 // Current sense config
 bool     sensorReady = false;   // set true after boot check passes
 uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
+int     adcMax = 0;            // max ADC reading in last 5 seconds
+uint32_t adcMaxTime = 0;      // timestamp when adcMax was recorded
 
 // Event enable flags
 bool evBitsEnabled   = true;
@@ -295,6 +304,8 @@ void handleState() {
                 ",\"pulseDurMs\":" + String(pulseDurMs) +
                 ",\"nextQ\":"   + String(nextOutput) +
                 ",\"sensorOK\":" + String(sensorReady ? "true" : "false") +
+                ",\"adcCurr\":" + String(sensorReady ? analogRead(PIN_CURRENT) : 0) +
+                ",\"adcMax\":" + String(adcMax) +
                 ",\"peaks\":[";
   for (int i = 0; i < 16; i++) {
     json += String(channelPeak[i]);
@@ -397,21 +408,35 @@ void parseTwitchMessage(const String& msg) {
 
   if (evPointsEnabled && rewardId.length() > 0) {
     if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
-      webLog("[TRIGGER] CHANNEL POINTS by " + user + " — firing output");
-      fireNextOutput(pulseDurMs);
+      pointsRedemptionCount++;
+      webLog("[IRC] Points redemption " + String(pointsRedemptionCount) + "/" + String(pointsThreshold) + " by " + user);
+      if (pointsRedemptionCount >= pointsThreshold) {
+        pointsRedemptionCount = 0;
+        webLog("[TRIGGER] CHANNEL POINTS threshold met — firing output");
+        fireNextOutput(pulseDurMs);
+      }
     } else {
       webLog("[IRC] Channel points reward " + rewardId + " does not match filter — ignored");
     }
   }
 
   if (evSubsEnabled && (msgId == "sub" || msgId == "resub" || msgId == "subgift")) {
-    webLog("[TRIGGER] SUB by " + user + " — firing output");
-    fireNextOutput(pulseDurMs);
+    subCount++;
+    webLog("[IRC] Sub event " + String(subCount) + "/" + String(subsThreshold) + " from " + user);
+    if (subCount >= subsThreshold) {
+      subCount = 0;
+      webLog("[TRIGGER] SUB threshold met — firing output");
+      fireNextOutput(pulseDurMs);
+    }
   }
 
   if (evRaidsEnabled && msgId == "raid") {
-    webLog("[TRIGGER] RAID from " + user + " — firing output");
-    fireNextOutput(pulseDurMs);
+    int viewers = extractTag(msg, "msg-param-viewerCount").toInt();
+    webLog("[IRC] RAID from " + user + " viewers=" + String(viewers) + " thresh=" + String(raidThreshold));
+    if (viewers >= raidThreshold) {
+      webLog("[TRIGGER] RAID threshold met — firing output");
+      fireNextOutput(pulseDurMs);
+    }
   }
 }
 
@@ -479,10 +504,10 @@ void handleUsed() {
 }
 
 void handleSaveCfg() {
-  if (server.hasArg("bits_threshold")) {
-    bitsThreshold = server.arg("bits_threshold").toInt();
-    if (bitsThreshold < 1) bitsThreshold = 1;
-  }
+  if (server.hasArg("bits_threshold")) bitsThreshold = max(1, server.arg("bits_threshold").toInt());
+  if (server.hasArg("points_threshold")) pointsThreshold = max(1, server.arg("points_threshold").toInt());
+  if (server.hasArg("subs_threshold")) subsThreshold = max(1, server.arg("subs_threshold").toInt());
+  if (server.hasArg("raid_threshold")) raidThreshold = max(1, server.arg("raid_threshold").toInt());
   if (server.hasArg("pulse_ms")) {
     int ms = server.arg("pulse_ms").toInt();
     if (ms >= 10 && ms <= 30000) pulseDurMs = ms;
@@ -508,6 +533,9 @@ void handleSaveCfg() {
 
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
+  prefs.putInt("pointsThresh", pointsThreshold);
+  prefs.putInt("subsThresh", subsThreshold);
+  prefs.putInt("raidThresh", raidThreshold);
   prefs.putUInt("pulseDurMs",  pulseDurMs);
   prefs.putUInt("csDelayMs",  currentSenseDelayMs);
   prefs.putString("channel",   twitchChannel);
@@ -529,7 +557,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
@@ -597,7 +625,10 @@ void setup() {
 
     prefs.begin("twitch", true);
     bitsThreshold = prefs.getInt("bitsThreshold", 100);
-    pulseDurMs   = prefs.getUInt("pulseDurMs",   500);
+    pointsThreshold = prefs.getInt("pointsThresh", 1);
+    subsThreshold = prefs.getInt("subsThresh", 1);
+    raidThreshold = prefs.getInt("raidThresh", 10);
+    pulseDurMs   = prefs.getUInt("pulseDurMs", 500);
     currentSenseDelayMs = prefs.getUInt("csDelayMs", 10);
     twitchChannel = prefs.getString("channel", "daverdavid");
     evBitsEnabled   = prefs.getBool("evBits",   true);
@@ -629,6 +660,16 @@ void setup() {
 void loop() {
   if (!apMode) {
     ArduinoOTA.handle();
+
+    // Continuous ADC monitoring — track max over 5 seconds
+    if (sensorReady) {
+      int adc = analogRead(PIN_CURRENT);
+      uint32_t now = millis();
+      if (adc > adcMax || now - adcMaxTime > 5000) {
+        adcMax = adc;
+        adcMaxTime = now;
+      }
+    }
 
     // Pulse auto-off — checked every loop iteration, no blocking delay
     if (pulseActive && (millis() >= pulseEnd)) {

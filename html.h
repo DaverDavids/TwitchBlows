@@ -358,6 +358,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     #status-text { font-size: 0.8rem; color: var(--muted); font-family: var(--font-mono); }
 
+    /* ── ADC bar ── */
+    .adc-bar {
+      width: 100%; max-width: 560px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.5rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
+
+    .adc-label { color: var(--muted); font-weight: 600; }
+
+    .adc-value { color: var(--green); font-weight: 700; }
+
     /* ── Console ── */
     .console {
       width: 100%; max-width: 560px;
@@ -570,6 +588,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <button class="reset-used-btn" onclick="resetUsed()">&#8635; RESET DEAD</button>
 </div>
 
+<div class="adc-bar">
+  <span class="adc-label">A0</span>
+  <span class="adc-value" id="adc-curr">--</span>
+  <span class="adc-label">MAX</span>
+  <span class="adc-value" id="adc-max">--</span>
+</div>
+
 <div class="status-bar">
   <div class="status-dot" id="status-dot"></div>
   <span id="status-text">Loading&#8230;</span>
@@ -602,12 +627,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="cfg-row-inline">
     <div class="cfg-row">
       <label for="cfg-bits">Bits Threshold</label>
-      <input type="number" id="cfg-bits" value="100" min="1" max="10000" step="1">
+      <input type="number" id="cfg-bits" value="100" min="1" max="1000000" step="1">
     </div>
     <div class="cfg-row">
-      <label for="cfg-pulse">Pulse Duration (ms)</label>
-      <input type="number" id="cfg-pulse" value="500" min="10" max="30000" step="10">
+      <label for="cfg-points-thresh">Points (redemptions)</label>
+      <input type="number" id="cfg-points-thresh" value="1" min="1" max="1000" step="1">
     </div>
+  </div>
+  <div class="cfg-row-inline">
+    <div class="cfg-row">
+      <label for="cfg-subs-thresh">Subs Threshold</label>
+      <input type="number" id="cfg-subs-thresh" value="1" min="1" max="1000" step="1">
+    </div>
+    <div class="cfg-row">
+      <label for="cfg-raid-thresh">Raid Viewers</label>
+      <input type="number" id="cfg-raid-thresh" value="10" min="1" max="100000" step="1">
+    </div>
+  </div>
+  <div class="cfg-row">
+    <label for="cfg-pulse">Pulse Duration (ms)</label>
+    <input type="number" id="cfg-pulse" value="500" min="10" max="30000" step="10">
   </div>
 
   <div class="cfg-row">
@@ -835,6 +874,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         twitchConn = data.twitch === true || data.twitch === 'true';
         nextQ    = data.nextQ || 0;
 
+        // Update ADC readings
+        if (data.adcCurr !== undefined) {
+          document.getElementById('adc-curr').textContent = data.adcCurr;
+        }
+        if (data.adcMax !== undefined) {
+          document.getElementById('adc-max').textContent = data.adcMax;
+        }
+
         // Update peak ADC values in button sub-labels
         if (data.peaks) {
           for (let i = 0; i < 16; i++) {
@@ -866,6 +913,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         .then(data => {
           document.getElementById('cfg-channel').value = data.channel || '';
           document.getElementById('cfg-bits').value   = data.bitsThreshold || 100;
+          document.getElementById('cfg-points-thresh').value = data.pointsThreshold || 1;
+          document.getElementById('cfg-subs-thresh').value   = data.subsThreshold || 1;
+          document.getElementById('cfg-raid-thresh').value   = data.raidThreshold || 10;
           document.getElementById('cfg-pulse').value  = data.pulseDurMs || 500;
           document.getElementById('cfg-cs-delay').value = data.csDelayMs || 10;
           document.getElementById('cfg-pts-filter').value = data.ptsFilter || '';
@@ -883,13 +933,21 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function saveCfg() {
     const params = new URLSearchParams();
     const ch = document.getElementById('cfg-channel').value.trim();
-const bits = document.getElementById('cfg-bits').value;
+    const bits = document.getElementById('cfg-bits').value;
+    const pointsThresh = document.getElementById('cfg-points-thresh').value;
+    const subsThresh = document.getElementById('cfg-subs-thresh').value;
+    const raidThresh = document.getElementById('cfg-raid-thresh').value;
     const pulse = document.getElementById('cfg-pulse').value;
     const csDelay = document.getElementById('cfg-cs-delay').value;
     const ptsFilter = document.getElementById('cfg-pts-filter').value.trim();
+    const oauth = document.getElementById('cfg-oauth').value.trim();
+    const nick = document.getElementById('cfg-nick').value.trim();
 
     if (ch) params.append('channel', ch);
     if (bits) params.append('bits_threshold', bits);
+    if (pointsThresh) params.append('points_threshold', pointsThresh);
+    if (subsThresh) params.append('subs_threshold', subsThresh);
+    if (raidThresh) params.append('raid_threshold', raidThresh);
     if (pulse) params.append('pulse_ms', pulse);
     if (csDelay) params.append('cs_delay_ms', csDelay);
     if (ptsFilter) params.append('pts_filter', ptsFilter);
