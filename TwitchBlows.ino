@@ -39,7 +39,7 @@
 #define PIN_CURRENT   0   // GPIO0 — change to whichever ADC-capable pin you're using
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
-#define CS_MIDPOINT_V     1.6f   // V at zero current (tune to your sensor's actual idle reading)
+#define CS_MIDPOINT_V     1.77f   // V at zero current (tune to your sensor's actual idle reading)
 #define CS_MV_PER_AMP    64.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_ADC_REF_V      3.3f    // ADC reference voltage
 #define CS_ADC_BITS      4095    // 12-bit ADC max count
@@ -504,10 +504,10 @@ void handleUsed() {
 }
 
 void handleSaveCfg() {
-  if (server.hasArg("bits_threshold")) bitsThreshold = max(1, server.arg("bits_threshold").toInt());
-  if (server.hasArg("points_threshold")) pointsThreshold = max(1, server.arg("points_threshold").toInt());
-  if (server.hasArg("subs_threshold")) subsThreshold = max(1, server.arg("subs_threshold").toInt());
-  if (server.hasArg("raid_threshold")) raidThreshold = max(1, server.arg("raid_threshold").toInt());
+  if (server.hasArg("bits_threshold"))   bitsThreshold   = max((int)1, (int)server.arg("bits_threshold").toInt());
+  if (server.hasArg("points_threshold")) pointsThreshold = max((int)1, (int)server.arg("points_threshold").toInt());
+  if (server.hasArg("subs_threshold"))   subsThreshold   = max((int)1, (int)server.arg("subs_threshold").toInt());
+  if (server.hasArg("raid_threshold"))   raidThreshold   = max((int)1, (int)server.arg("raid_threshold").toInt());
   if (server.hasArg("pulse_ms")) {
     int ms = server.arg("pulse_ms").toInt();
     if (ms >= 10 && ms <= 30000) pulseDurMs = ms;
