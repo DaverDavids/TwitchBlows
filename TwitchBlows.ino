@@ -547,8 +547,8 @@ void setup() {
   pinMode(PIN_DATA,  OUTPUT);
   pinMode(PIN_CLOCK, OUTPUT);
   pinMode(PIN_LATCH, OUTPUT);
-  pinMode(PIN_OE,    OUTPUT);
   digitalWrite(PIN_OE,    HIGH);   // disable outputs during init
+  pinMode(PIN_OE,    OUTPUT);
   digitalWrite(PIN_LATCH, HIGH);  // idle state
   setOutput(-1);                  // all off at boot
 
