@@ -610,15 +610,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
-  <div class="cfg-row-inline">
-    <div class="cfg-row">
-      <label for="cfg-cs-thresh">Current Sense Threshold</label>
-      <input type="number" id="cfg-cs-thresh" value="10" min="1" max="4095" step="1">
-    </div>
-    <div class="cfg-row">
-      <label for="cfg-cs-delay">Current Sense Delay (ms)</label>
-      <input type="number" id="cfg-cs-delay" value="10" min="1" max="500" step="1">
-    </div>
+  <div class="cfg-row">
+    <label for="cfg-cs-delay">Current Sense Delay (ms)</label>
+    <input type="number" id="cfg-cs-delay" value="10" min="1" max="500" step="1">
   </div>
 
   <div class="cfg-row">
@@ -846,7 +840,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           for (let i = 0; i < 16; i++) {
             const sub = document.getElementById('sub' + i);
             if (sub && data.peaks[i] > 0 && !sub.textContent.includes('ON')) {
-              sub.textContent = data.peaks[i];
+              sub.textContent = data.peaks[i] + 'mA';
             }
           }
         }
@@ -873,7 +867,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           document.getElementById('cfg-channel').value = data.channel || '';
           document.getElementById('cfg-bits').value   = data.bitsThreshold || 100;
           document.getElementById('cfg-pulse').value  = data.pulseDurMs || 500;
-          document.getElementById('cfg-cs-thresh').value = data.csThresh || 10;
           document.getElementById('cfg-cs-delay').value = data.csDelayMs || 10;
           document.getElementById('cfg-pts-filter').value = data.ptsFilter || '';
           document.getElementById('cb-bits').checked   = data.evBits === true || data.evBits === 'true';
@@ -890,18 +883,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function saveCfg() {
     const params = new URLSearchParams();
     const ch = document.getElementById('cfg-channel').value.trim();
-    const bits = document.getElementById('cfg-bits').value;
+const bits = document.getElementById('cfg-bits').value;
     const pulse = document.getElementById('cfg-pulse').value;
-    const csThresh = document.getElementById('cfg-cs-thresh').value;
     const csDelay = document.getElementById('cfg-cs-delay').value;
     const ptsFilter = document.getElementById('cfg-pts-filter').value.trim();
-    const oauth = document.getElementById('cfg-oauth').value.trim();
-    const nick = document.getElementById('cfg-nick').value.trim();
 
     if (ch) params.append('channel', ch);
     if (bits) params.append('bits_threshold', bits);
     if (pulse) params.append('pulse_ms', pulse);
-    if (csThresh) params.append('cs_threshold', csThresh);
     if (csDelay) params.append('cs_delay_ms', csDelay);
     if (ptsFilter) params.append('pts_filter', ptsFilter);
     params.append('ev_bits', document.getElementById('cb-bits').checked ? '1' : '0');

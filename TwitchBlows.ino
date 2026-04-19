@@ -38,6 +38,13 @@
 
 #define PIN_CURRENT   0   // GPIO0 — change to whichever ADC-capable pin you're using
 
+// Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
+#define CS_MIDPOINT_V     1.6f   // V at zero current (tune to your sensor's actual idle reading)
+#define CS_MV_PER_AMP    064.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
+#define CS_ADC_REF_V      3.3f    // ADC reference voltage
+#define CS_ADC_BITS      4095    // 12-bit ADC max count
+#define CS_DETECT_AMPS  1.9f    // minimum current (A) to count as live output
+
 // ── Globals ───────────────────────────────────
 WebServer   server(80);
 DNSServer   dns;
@@ -68,7 +75,7 @@ uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
 String  twitchChannel = "daverdavid";  // loaded from prefs
 
 // Current sense config
-int      currentThreshold  = 0;    // 0 = DISABLED (set >0 to enable)
+bool     sensorReady = false;   // set true after boot check passes
 uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
 
 // Event enable flags
@@ -114,6 +121,11 @@ void shiftWrite(uint16_t val) {
   digitalWrite(PIN_LATCH, HIGH);
 }
 
+float adcToAmps(int raw) {
+  float v = (raw / (float)CS_ADC_BITS) * CS_ADC_REF_V;
+  return (v - CS_MIDPOINT_V) / (CS_MV_PER_AMP / 1000.0f);
+}
+
 void setOutput(int8_t q) {
   activeQ = q;
   shiftWrite((q >= 0) ? (uint16_t)(1 << q) : 0);
@@ -140,6 +152,8 @@ void safePulse(int8_t q, uint32_t ms) {
 
 // ── Fire next live output with current sensing ─
 int fireNextOutput(uint32_t pulseDurationMs) {
+  if (!sensorReady) { webLog("[FIRE] Blocked — sensor not ready"); return -1; }
+
   clearAllOutputs();
 
   for (int tries = 0; tries < 16; tries++) {
@@ -154,25 +168,25 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     shiftWrite((uint16_t)(1u << q));
     webLog("[FIRE] Ch" + String(q+1) + " — firing output...");
 
-    // Sample ADC for peak over the sense window
-    int peakRaw = 0;
-    if (currentThreshold > 0) {
-      uint32_t senseStart = millis();
-      while (millis() - senseStart < currentSenseDelayMs) {
-        int raw = analogRead(PIN_CURRENT);
-        if (raw > peakRaw) peakRaw = raw;
-      }
-      channelPeak[q] = peakRaw;
-      webLog("[SENSE] Ch" + String(q+1) + " peak=" + String(peakRaw) + " thresh=" + String(currentThreshold));
+    // Sample peak deviation from midpoint over sense window
+    float peakAmps = 0.0f;
+    uint32_t senseStart = millis();
+    while (millis() - senseStart < currentSenseDelayMs) {
+      int raw = analogRead(PIN_CURRENT);
+      float a = fabsf(adcToAmps(raw));
+      if (a > peakAmps) peakAmps = a;
+    }
+    channelPeak[q] = (int)(peakAmps * 1000.0f);  // store as mA
 
-      if (peakRaw < currentThreshold) {
-        shiftWrite(0);
-        usedOutputs |= (uint16_t)(1u << q);
-        webLog("[FIRE] Ch" + String(q+1) + " DEAD — skipping");
-        continue;
-      }
-    } else {
-      webLog("[SENSE] Ch" + String(q+1) + " — sense DISABLED, assuming live");
+    webLog("[SENSE] Ch" + String(q+1) + " peak=" + String(peakAmps, 3) + "A");
+
+    // Deviation check: voltage must move >0.35V from midpoint
+    float csThreshAmps = CS_DETECT_AMPS;
+    if (peakAmps < csThreshAmps) {
+      shiftWrite(0);
+      usedOutputs |= (uint16_t)(1u << q);
+      webLog("[FIRE] Ch" + String(q+1) + " DEAD (" + String(peakAmps,3) + "A < " + String(csThreshAmps,3) + "A)");
+      continue;
     }
 
     // Use safePulse for guaranteed single-output, always-off-after
@@ -244,6 +258,7 @@ void handleSet() {
 
 // /pulse?q=N&ms=M  — raise output N for M ms then auto-drop in loop()
 void handlePulse() {
+  if (!sensorReady) { sendJSON(503, "{\"ok\":false,\"err\":\"sensor not ready\"}"); return; }
   if (!server.hasArg("q") || !server.hasArg("ms")) {
     sendJSON(400, "{\"ok\":false,\"err\":\"missing q or ms\"}");
     return;
@@ -279,6 +294,7 @@ void handleState() {
                 ",\"bitsThresh\":" + String(bitsThreshold) +
                 ",\"pulseDurMs\":" + String(pulseDurMs) +
                 ",\"nextQ\":"   + String(nextOutput) +
+                ",\"sensorOK\":" + String(sensorReady ? "true" : "false") +
                 ",\"peaks\":[";
   for (int i = 0; i < 16; i++) {
     json += String(channelPeak[i]);
@@ -471,11 +487,6 @@ void handleSaveCfg() {
     int ms = server.arg("pulse_ms").toInt();
     if (ms >= 10 && ms <= 30000) pulseDurMs = ms;
   }
-  if (server.hasArg("cs_threshold")) {
-    currentThreshold = server.arg("cs_threshold").toInt();
-    if (currentThreshold < 1) currentThreshold = 1;
-    if (currentThreshold > 4095) currentThreshold = 4095;
-  }
   if (server.hasArg("cs_delay_ms")) {
     int d = server.arg("cs_delay_ms").toInt();
     if (d >= 1 && d <= 500) currentSenseDelayMs = d;
@@ -498,7 +509,6 @@ void handleSaveCfg() {
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
   prefs.putUInt("pulseDurMs",  pulseDurMs);
-  prefs.putInt("csThresh",    currentThreshold);
   prefs.putUInt("csDelayMs",  currentSenseDelayMs);
   prefs.putString("channel",   twitchChannel);
   prefs.putBool("evBits",    evBitsEnabled);
@@ -519,7 +529,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csThresh\":" + String(currentThreshold) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
@@ -557,6 +567,17 @@ void setup() {
 
   pinMode(PIN_CURRENT, INPUT);
 
+  // Confirm current sensor is present and idle (expect ~1.65V ±0.3V)
+  delay(50);
+  int csIdle = analogRead(PIN_CURRENT);
+  float csIdleV = (csIdle / (float)CS_ADC_BITS) * CS_ADC_REF_V;
+  bool sensorOK = (csIdleV >= 1.2f && csIdleV <= 2.1f);
+  webLog("[BOOT] CS idle=" + String(csIdleV, 3) + "V " + (sensorOK ? "OK" : "SENSOR FAULT — outputs DISABLED"));
+  if (!sensorOK) {
+    digitalWrite(PIN_OE, HIGH);   // disable 595 outputs
+  }
+  sensorReady = sensorOK;
+
   prefs.begin("wifi", true);
   String savedSSID = prefs.getString("ssid", MYSSID);
   String savedPSK  = prefs.getString("psk",  MYPSK);
@@ -577,7 +598,6 @@ void setup() {
     prefs.begin("twitch", true);
     bitsThreshold = prefs.getInt("bitsThreshold", 100);
     pulseDurMs   = prefs.getUInt("pulseDurMs",   500);
-    currentThreshold = prefs.getInt("csThresh", 10);
     currentSenseDelayMs = prefs.getUInt("csDelayMs", 10);
     twitchChannel = prefs.getString("channel", "daverdavid");
     evBitsEnabled   = prefs.getBool("evBits",   true);
