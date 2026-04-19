@@ -607,8 +607,8 @@ void setup() {
   sensorReady = sensorOK;
 
   prefs.begin("wifi", true);
-  String savedSSID = prefs.getString("ssid", MYSSID);
-  String savedPSK  = prefs.getString("psk",  MYPSK);
+  String savedSSID = prefs.getString("ssid", MYSSIDIOT);
+  String savedPSK  = prefs.getString("psk",  MYPSKIOT);
   prefs.end();
 
   if (!connectWifi(savedSSID, savedPSK)) {
