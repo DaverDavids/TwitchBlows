@@ -40,7 +40,7 @@
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
 #define CS_MIDPOINT_V     1.6f   // V at zero current (tune to your sensor's actual idle reading)
-#define CS_MV_PER_AMP    064.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
+#define CS_MV_PER_AMP    64.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_ADC_REF_V      3.3f    // ADC reference voltage
 #define CS_ADC_BITS      4095    // 12-bit ADC max count
 #define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
@@ -665,9 +665,12 @@ void loop() {
     if (sensorReady) {
       int adc = analogRead(PIN_CURRENT);
       uint32_t now = millis();
-      if (adc > adcMax || now - adcMaxTime > 5000) {
-        adcMax = adc;
-        adcMaxTime = now;
+      if (now - adcMaxTime > 5000) {
+          adcMax = 0;          // reset window
+          adcMaxTime = now;
+      }
+      if (adc > adcMax) {
+          adcMax = adc;        // track peak within window
       }
     }
 
