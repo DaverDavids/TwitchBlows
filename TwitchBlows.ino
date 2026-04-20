@@ -637,8 +637,6 @@ void setup() {
     evRaidsEnabled  = prefs.getBool("evRaids",  false);
     pointsRewardFilter = prefs.getString("ptsFilter", "");
     prefs.end();
-
-    connectTwitch();
   }
 
   server.on("/",         handleRoot);
@@ -687,15 +685,17 @@ void loop() {
       webLog("[PULSE] ended — output OFF");
     }
 
-    // Twitch IRC polling with auto-reconnect
-    if (twitchConnected) {
-      handleTwitchIRC();
-    } else {
+    // Twitch IRC — connect in background, then poll with auto-reconnect
+    static bool twitchInitDone = false;
+    if (!twitchInitDone || !twitchConnected) {
       static uint32_t lastTwitchRetry = 0;
       if (millis() - lastTwitchRetry > 10000) {
         lastTwitchRetry = millis();
+        twitchInitDone = true;
         connectTwitch();
       }
+    } else if (twitchConnected) {
+      handleTwitchIRC();
     }
 
     // WiFi reconnect — debounced to every 5 s so a drop never stalls the loop
@@ -705,8 +705,8 @@ void loop() {
       if (WiFi.status() != WL_CONNECTED) {
         DPRINTLN("WiFi lost, reconnecting...");
         prefs.begin("wifi", true);
-        String ssid = prefs.getString("ssid", MYSSID);
-        String psk  = prefs.getString("psk",  MYPSK);
+        String ssid = prefs.getString("ssid", MYSSIDIOT);
+        String psk  = prefs.getString("psk",  MYPSKIOT);
         prefs.end();
         if (!connectWifi(ssid, psk)) {
           DPRINTLN("Reconnect failed — fallback to AP");
