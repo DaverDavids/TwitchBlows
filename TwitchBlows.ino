@@ -25,7 +25,7 @@
 
 // ── Configuration ─────────────────────────────
 #define HOSTNAME      "twitchblows"
-#define WIFI_TIMEOUT  15000      // ms to wait for STA connection
+#define WIFI_TIMEOUT  8000      // ms to wait for STA connection
 #define AP_SSID       HOSTNAME   // Captive portal AP name
 
 // SN74HC595 pins (adjust to your wiring)
@@ -36,7 +36,7 @@
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
-#define PIN_CURRENT   0   // GPIO0 — change to whichever ADC-capable pin you're using
+#define PIN_CURRENT   4   // GPIO0 — change to whichever ADC-capable pin you're using
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
 #define CS_MIDPOINT_V     1.77f   // V at zero current (tune to your sensor's actual idle reading)
@@ -222,17 +222,35 @@ void sendJSON(int code, const String &json) {
 
 // ── WiFi ──────────────────────────────────────
 bool connectWifi(const String &ssid, const String &psk) {
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_15dBm);
   WiFi.setHostname(HOSTNAME);
+
+  // RF calibration kick
   WiFi.begin(ssid.c_str(), psk.c_str());
-  DPRINT("Connecting to "); DPRINTLN(ssid);
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT) {
-    delay(250); DPRINT(".");
+  delay(500);
+  WiFi.disconnect(true);
+  delay(200);
+
+  // Retry loop (3 attempts, 5s each)
+  for (int attempt = 0; attempt < 3; attempt++) {
+    DPRINT("Connecting to "); DPRINT(ssid); DPRINT(" attempt "); DPRINTLN(attempt + 1);
+    WiFi.begin(ssid.c_str(), psk.c_str());
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
+      delay(100); DPRINT(".");
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      DPRINTLN("");
+      return true;
+    }
+    WiFi.disconnect(true);
+    delay(500);
   }
-  DPRINTLN("");
-  return WiFi.status() == WL_CONNECTED;
+  DPRINTLN("failed");
+  return false;
 }
 
 void startAP() {
