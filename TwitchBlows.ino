@@ -223,7 +223,7 @@ void sendJSON(int code, const String &json) {
 // ── WiFi ──────────────────────────────────────
 bool connectWifi(const String &ssid, const String &psk) {
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_11dBm);
+  WiFi.setTxPower(WIFI_POWER_15dBm);
   WiFi.setHostname(HOSTNAME);
   WiFi.begin(ssid.c_str(), psk.c_str());
   DPRINT("Connecting to "); DPRINTLN(ssid);
