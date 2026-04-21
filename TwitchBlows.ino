@@ -39,7 +39,7 @@
 #define PIN_CURRENT   2   // GPIO0 — change to whichever ADC-capable pin you're using
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
-#define CS_MIDPOINT_V     2.06f   // V at zero current (tune to your sensor's actual idle reading)
+#define CS_MIDPOINT_V     2.3f   // V at zero current (tune to your sensor's actual idle reading)
 #define CS_MV_PER_AMP    64.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_ADC_REF_V      3.3f    // ADC reference voltage
 #define CS_ADC_BITS      4095    // 12-bit ADC max count
@@ -597,7 +597,11 @@ void setup() {
   delay(200);
 #endif
   DPRINTLN("\n\n=== TwitchBlows ===");
-
+  pinMode(7, INPUT_PULLUP);
+  pinMode(8, INPUT_PULLUP);
+  pinMode(9, INPUT_PULLUP);
+  pinMode(20, INPUT_PULLUP);
+  pinMode(21, INPUT_PULLUP);
   // 595 pins — initialise latch HIGH before first shiftWrite
   // OE pulled HIGH at boot to keep outputs disabled until we're ready
   pinMode(PIN_DATA,  OUTPUT);
