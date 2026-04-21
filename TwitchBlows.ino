@@ -25,7 +25,7 @@
 
 // ── Configuration ─────────────────────────────
 #define HOSTNAME      "twitchblows"
-#define WIFI_TIMEOUT  8000      // ms to wait for STA connection
+#define WIFI_TIMEOUT  5000      // ms to wait for STA connection
 #define AP_SSID       HOSTNAME   // Captive portal AP name
 
 // SN74HC595 pins (adjust to your wiring)
@@ -36,10 +36,10 @@
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
-#define PIN_CURRENT   4   // GPIO0 — change to whichever ADC-capable pin you're using
+#define PIN_CURRENT   2   // GPIO0 — change to whichever ADC-capable pin you're using
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
-#define CS_MIDPOINT_V     1.77f   // V at zero current (tune to your sensor's actual idle reading)
+#define CS_MIDPOINT_V     2.06f   // V at zero current (tune to your sensor's actual idle reading)
 #define CS_MV_PER_AMP    64.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_ADC_REF_V      3.3f    // ADC reference voltage
 #define CS_ADC_BITS      4095    // 12-bit ADC max count
@@ -239,7 +239,7 @@ bool connectWifi(const String &ssid, const String &psk) {
     DPRINT("Connecting to "); DPRINT(ssid); DPRINT(" attempt "); DPRINTLN(attempt + 1);
     WiFi.begin(ssid.c_str(), psk.c_str());
     unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 8000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 5000) {
       delay(100); DPRINT(".");
     }
     if (WiFi.status() == WL_CONNECTED) {
