@@ -225,7 +225,7 @@ bool connectWifi(const String &ssid, const String &psk) {
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_15dBm);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.setHostname(HOSTNAME);
 
   // RF calibration kick
