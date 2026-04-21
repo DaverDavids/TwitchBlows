@@ -73,7 +73,7 @@ unsigned long     lastTwitchPing = 0;
 int     bitsThreshold = 100;    // bits needed to trigger one output
 int     pointsThreshold = 1;     // min channel points redemptions to trigger
 int     subsThreshold = 1;       // min subs to trigger
-int     raidThreshold = 10;       // min raid viewer count to trigger
+int     raidThreshold = 5;       // min raid viewer count to trigger
 uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
 String  twitchChannel = "daverdavid";  // loaded from prefs
 
@@ -613,12 +613,12 @@ void setup() {
 
   pinMode(PIN_CURRENT, INPUT);
 
-  // Confirm current sensor is present and idle (expect ~1.65V ±0.3V)
+  // Confirm current sensor is present and idle (expect ~CS_MIDPOINT_V ±0.5V)
   delay(50);
   int csIdle = analogRead(PIN_CURRENT);
   float csIdleV = (csIdle / (float)CS_ADC_BITS) * CS_ADC_REF_V;
-  bool sensorOK = (csIdleV >= 1.2f && csIdleV <= 2.1f);
-  webLog("[BOOT] CS idle=" + String(csIdleV, 3) + "V " + (sensorOK ? "OK" : "SENSOR FAULT — outputs DISABLED"));
+  bool sensorOK = (csIdleV >= CS_MIDPOINT_V - 0.5f && csIdleV <= CS_MIDPOINT_V + 0.5f);
+  webLog("[BOOT] CS idle=" + String(csIdleV, 3) + "V (expect " + String(CS_MIDPOINT_V, 2) + "V) " + (sensorOK ? "OK" : "SENSOR FAULT — outputs DISABLED"));
   if (!sensorOK) {
     digitalWrite(PIN_OE, HIGH);   // disable 595 outputs
   }
