@@ -595,6 +595,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <span class="adc-value" id="adc-max">--</span>
 </div>
 
+<div class="adc-bar">
+  <span class="adc-label">AMP</span>
+  <span class="adc-value" id="amp-curr">--</span>
+  <span class="adc-label">MAX</span>
+  <span class="adc-value" id="amp-max">--</span>
+</div>
+
 <div class="status-bar">
   <div class="status-dot" id="status-dot"></div>
   <span id="status-text">Loading&#8230;</span>
@@ -874,12 +881,18 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         twitchConn = data.twitch === true || data.twitch === 'true';
         nextQ    = data.nextQ || 0;
 
-        // Update ADC readings
+        // Update ADC readings (now in millivolts)
         if (data.adcCurr !== undefined) {
-          document.getElementById('adc-curr').textContent = data.adcCurr;
+          document.getElementById('adc-curr').textContent = data.adcCurr + 'mV';
         }
         if (data.adcMax !== undefined) {
-          document.getElementById('adc-max').textContent = data.adcMax;
+          document.getElementById('adc-max').textContent = data.adcMax + 'mV';
+        }
+        if (data.ampCurr !== undefined) {
+          document.getElementById('amp-curr').textContent = data.ampCurr + 'A';
+        }
+        if (data.ampMax !== undefined) {
+          document.getElementById('amp-max').textContent = data.ampMax + 'A';
         }
 
         // Update peak ADC values in button sub-labels

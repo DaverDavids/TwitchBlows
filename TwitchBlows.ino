@@ -36,13 +36,11 @@
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
-#define PIN_CURRENT   2   // GPIO0 — change to whichever ADC-capable pin you're using
+#define PIN_CURRENT   2
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
-#define CS_MIDPOINT_V     2.3f   // V at zero current (tune to your sensor's actual idle reading)
-#define CS_MV_PER_AMP    64.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
-#define CS_ADC_REF_V      3.3f    // ADC reference voltage
-#define CS_ADC_BITS      4095    // 12-bit ADC max count
+#define CS_MIDPOINT_V     2.5f   // V at zero current (tune to your sensor's actual idle reading)
+#define CS_MV_PER_AMP    -100.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
 
 // ── Globals ───────────────────────────────────
@@ -84,8 +82,10 @@ int subCount = 0;
 // Current sense config
 bool     sensorReady = false;   // set true after boot check passes
 uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
-int     adcMax = 0;            // max ADC reading in last 5 seconds
+int     adcMax = 0;            // max ADC reading in last 5 seconds (mV)
 uint32_t adcMaxTime = 0;      // timestamp when adcMax was recorded
+float   ampMax = 0.0f;       // max amperage in last 5 seconds
+uint32_t ampMaxTime = 0;     // timestamp when ampMax was recorded
 
 // Event enable flags
 bool evBitsEnabled   = true;
@@ -130,40 +130,48 @@ void shiftWrite(uint16_t val) {
   digitalWrite(PIN_LATCH, HIGH);
 }
 
-float adcToAmps(int raw) {
-  float v = (raw / (float)CS_ADC_BITS) * CS_ADC_REF_V;
+void shiftWriteEnabled(uint16_t val) {
+  digitalWrite(PIN_LATCH, LOW);
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);
+  digitalWrite(PIN_LATCH, HIGH);
+  if (val != 0) digitalWrite(PIN_OE, LOW);
+}
+
+void disableOutputs() {
+  digitalWrite(PIN_OE, HIGH);
+  digitalWrite(PIN_LATCH, LOW);
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
+  digitalWrite(PIN_LATCH, HIGH);
+}
+
+float adcToAmps(int millivolts) {
+  float v = millivolts / 1000.0f;
   return (v - CS_MIDPOINT_V) / (CS_MV_PER_AMP / 1000.0f);
-}
-
-void setOutput(int8_t q) {
-  activeQ = q;
-  shiftWrite((q >= 0) ? (uint16_t)(1 << q) : 0);
-  webLog("[TOGGLE] Ch" + String(q+1) + " " + (q >= 0 ? "ON" : "OFF"));
-}
-
-// ── Single-output enforcer ────────────────────
-void clearAllOutputs() {
-  shiftWrite(0);
-  pulseActive = false;
-  pulseQ      = -1;
-  activeQ     = -1;
 }
 
 // ── Safe pulse: guaranteed single-output, always-off-after ─
 void safePulse(int8_t q, uint32_t ms) {
-  clearAllOutputs();
+  disableOutputs();
+  pulseActive = false;
+  pulseQ      = -1;
+  activeQ     = -1;
+
   if (q < 0 || q > 15) return;
-  shiftWrite((uint16_t)(1u << q));
+
+  shiftWriteEnabled((uint16_t)(1u << q));
   pulseActive = true;
   pulseQ      = q;
   pulseEnd    = millis() + ms;
+  webLog("[FIRE] Ch" + String(q+1) + " ON for " + String(ms) + "ms");
 }
 
 // ── Fire next live output with current sensing ─
 int fireNextOutput(uint32_t pulseDurationMs) {
   if (!sensorReady) { webLog("[FIRE] Blocked — sensor not ready"); return -1; }
 
-  clearAllOutputs();
+  disableOutputs();
 
   for (int tries = 0; tries < 16; tries++) {
     int q = nextOutput;
@@ -174,15 +182,15 @@ int fireNextOutput(uint32_t pulseDurationMs) {
       continue;
     }
 
-    shiftWrite((uint16_t)(1u << q));
+    shiftWriteEnabled((uint16_t)(1u << q));
     webLog("[FIRE] Ch" + String(q+1) + " — firing output...");
 
     // Sample peak deviation from midpoint over sense window
     float peakAmps = 0.0f;
     uint32_t senseStart = millis();
     while (millis() - senseStart < currentSenseDelayMs) {
-      int raw = analogRead(PIN_CURRENT);
-      float a = fabsf(adcToAmps(raw));
+      int mv = analogReadMilliVolts(PIN_CURRENT);
+      float a = fabsf(adcToAmps(mv));
       if (a > peakAmps) peakAmps = a;
     }
     channelPeak[q] = (int)(peakAmps * 1000.0f);  // store as mA
@@ -192,7 +200,7 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     // Deviation check: voltage must move >0.35V from midpoint
     float csThreshAmps = CS_DETECT_AMPS;
     if (peakAmps < csThreshAmps) {
-      shiftWrite(0);
+      disableOutputs();
       usedOutputs |= (uint16_t)(1u << q);
       webLog("[FIRE] Ch" + String(q+1) + " DEAD (" + String(peakAmps,3) + "A < " + String(csThreshAmps,3) + "A)");
       continue;
@@ -206,7 +214,7 @@ int fireNextOutput(uint32_t pulseDurationMs) {
   }
 
   webLog("[FIRE] All 16 outputs exhausted");
-  clearAllOutputs();
+  disableOutputs();
   return -1;
 }
 
@@ -273,42 +281,31 @@ void handleRoot() {
 }
 
 void handleSet() {
-  clearAllOutputs();
-
   if (server.hasArg("q")) {
     int q = server.arg("q").toInt();
     if (q < 0 || q > 15) q = -1;
-    setOutput((int8_t)q);
+    if (q < 0) {
+      disableOutputs();
+    } else {
+      safePulse((int8_t)q, 500);  // manual toggle uses 500ms default
+    }
   }
   sendJSON(200, "{\"active\":" + String(activeQ) + "}");
 }
 
 // /pulse?q=N&ms=M  — raise output N for M ms then auto-drop in loop()
 void handlePulse() {
-  if (!sensorReady) { sendJSON(503, "{\"ok\":false,\"err\":\"sensor not ready\"}"); return; }
   if (!server.hasArg("q") || !server.hasArg("ms")) {
     sendJSON(400, "{\"ok\":false,\"err\":\"missing q or ms\"}");
     return;
   }
-
   int q  = server.arg("q").toInt();
-  int ms = server.arg("ms").toInt();
-
+  int ms = constrain(server.arg("ms").toInt(), 10, 30000);
   if (q < 0 || q > 15) {
     sendJSON(400, "{\"ok\":false,\"err\":\"q out of range\"}");
     return;
   }
-  if (ms < 10)    ms = 10;
-  if (ms > 30000) ms = 30000;
-
-  clearAllOutputs();
-  shiftWrite((uint16_t)(1u << q));
-  pulseActive = true;
-  pulseQ      = (int8_t)q;
-  pulseEnd    = millis() + (uint32_t)ms;
-
-  webLog("[PULSE] Ch" + String(q+1) + " for " + String(ms) + "ms");
-
+  safePulse((int8_t)q, (uint32_t)ms);
   sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"ms\":" + String(ms) + "}");
 }
 
@@ -322,8 +319,10 @@ void handleState() {
                 ",\"pulseDurMs\":" + String(pulseDurMs) +
                 ",\"nextQ\":"   + String(nextOutput) +
                 ",\"sensorOK\":" + String(sensorReady ? "true" : "false") +
-                ",\"adcCurr\":" + String(sensorReady ? analogRead(PIN_CURRENT) : 0) +
+                ",\"adcCurr\":" + String(sensorReady ? analogReadMilliVolts(PIN_CURRENT) : 0) +
                 ",\"adcMax\":" + String(adcMax) +
+                ",\"ampCurr\":" + String(sensorReady ? String(fabsf(adcToAmps(analogReadMilliVolts(PIN_CURRENT))), 3) : "0") +
+                ",\"ampMax\":" + String(ampMax, 3) +
                 ",\"peaks\":[";
   for (int i = 0; i < 16; i++) {
     json += String(channelPeak[i]);
@@ -512,6 +511,7 @@ void handleTwitchIRC() {
 void handleResetUsed() {
   usedOutputs = 0;
   nextOutput  = 0;
+  pendingUsedQ = -1;
   sendJSON(200, "{\"ok\":true}");
 }
 
@@ -607,20 +607,18 @@ void setup() {
   pinMode(PIN_DATA,  OUTPUT);
   pinMode(PIN_CLOCK, OUTPUT);
   pinMode(PIN_LATCH, OUTPUT);
-  digitalWrite(PIN_OE,    HIGH);   // disable outputs during init
   pinMode(PIN_OE,    OUTPUT);
+  digitalWrite(PIN_OE,    HIGH);   // outputs disabled by default
   digitalWrite(PIN_LATCH, HIGH);  // idle state
-  setOutput(-1);                  // all off at boot
+  disableOutputs();                // all off at boot
 
-  // Enable 595 outputs after init is complete
-  digitalWrite(PIN_OE, LOW);
-
+  analogSetAttenuation(ADC_11db);
   pinMode(PIN_CURRENT, INPUT);
 
   // Confirm current sensor is present and idle (expect ~CS_MIDPOINT_V ±0.5V)
   delay(50);
-  int csIdle = analogRead(PIN_CURRENT);
-  float csIdleV = (csIdle / (float)CS_ADC_BITS) * CS_ADC_REF_V;
+  uint32_t csIdleMv = analogReadMilliVolts(PIN_CURRENT);
+  float csIdleV = csIdleMv / 1000.0f;
   bool sensorOK = (csIdleV >= CS_MIDPOINT_V - 0.5f && csIdleV <= CS_MIDPOINT_V + 0.5f);
   webLog("[BOOT] CS idle=" + String(csIdleV, 3) + "V (expect " + String(CS_MIDPOINT_V, 2) + "V) " + (sensorOK ? "OK" : "SENSOR FAULT — outputs DISABLED"));
   if (!sensorOK) {
@@ -683,28 +681,37 @@ void loop() {
 
     // Continuous ADC monitoring — track max over 5 seconds
     if (sensorReady) {
-      int adc = analogRead(PIN_CURRENT);
+      uint32_t mv = analogReadMilliVolts(PIN_CURRENT);
       uint32_t now = millis();
       if (now - adcMaxTime > 5000) {
           adcMax = 0;          // reset window
           adcMaxTime = now;
       }
-      if (adc > adcMax) {
-          adcMax = adc;        // track peak within window
+      if (mv > adcMax) {
+          adcMax = mv;        // track peak within window (in mV)
+      }
+      float amps = fabsf(adcToAmps(mv));
+      if (now - ampMaxTime > 5000) {
+          ampMax = 0.0f;
+          ampMaxTime = now;
+      }
+      if (amps > ampMax) {
+          ampMax = amps;
       }
     }
 
     // Pulse auto-off — checked every loop iteration, no blocking delay
     if (pulseActive && (millis() >= pulseEnd)) {
-      shiftWrite(0);
+      disableOutputs();
       pulseActive = false;
       pulseQ      = -1;
+      activeQ     = -1;
       if (pendingUsedQ >= 0) {
         usedOutputs |= (uint16_t)(1u << pendingUsedQ);
         webLog("[USED] Ch" + String(pendingUsedQ+1) + " marked dead after fire");
         pendingUsedQ = -1;
       }
-      webLog("[PULSE] ended — output OFF");
+      webLog("[FIRE] Ch pulse ended — output OFF");
     }
 
     // Twitch IRC — connect in background, then poll with auto-reconnect
