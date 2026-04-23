@@ -593,6 +593,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <span class="adc-value" id="adc-curr">--</span>
   <span class="adc-label">MAX</span>
   <span class="adc-value" id="adc-max">--</span>
+  <span class="adc-label">MIN</span>
+  <span class="adc-value" id="adc-min">--</span>
 </div>
 
 <div class="adc-bar">
@@ -600,6 +602,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <span class="adc-value" id="amp-curr">--</span>
   <span class="adc-label">MAX</span>
   <span class="adc-value" id="amp-max">--</span>
+  <span class="adc-label">MIN</span>
+  <span class="adc-value" id="amp-min">--</span>
 </div>
 
 <div class="status-bar">
@@ -888,11 +892,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         if (data.adcMax !== undefined) {
           document.getElementById('adc-max').textContent = data.adcMax + 'mV';
         }
+        if (data.adcMin !== undefined) {
+          document.getElementById('adc-min').textContent = data.adcMin + 'mV';
+        }
         if (data.ampCurr !== undefined) {
           document.getElementById('amp-curr').textContent = data.ampCurr + 'A';
         }
         if (data.ampMax !== undefined) {
           document.getElementById('amp-max').textContent = data.ampMax + 'A';
+        }
+        if (data.ampMin !== undefined) {
+          document.getElementById('amp-min').textContent = data.ampMin + 'A';
         }
 
         // Update peak ADC values in button sub-labels

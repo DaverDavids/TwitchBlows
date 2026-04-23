@@ -83,9 +83,13 @@ int subCount = 0;
 bool     sensorReady = false;   // set true after boot check passes
 uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
 int     adcMax = 0;            // max ADC reading in last 5 seconds (mV)
+int     adcMin = 0;            // min ADC reading in last 5 seconds (mV)
 uint32_t adcMaxTime = 0;      // timestamp when adcMax was recorded
+uint32_t adcMinTime = 0;    // timestamp when adcMin was recorded
 float   ampMax = 0.0f;       // max amperage in last 5 seconds
+float   ampMin = 0.0f;        // min amperage in last 5 seconds
 uint32_t ampMaxTime = 0;     // timestamp when ampMax was recorded
+uint32_t ampMinTime = 0;    // timestamp when ampMin was recorded
 
 // Event enable flags
 bool evBitsEnabled   = true;
@@ -321,8 +325,10 @@ void handleState() {
                 ",\"sensorOK\":" + String(sensorReady ? "true" : "false") +
                 ",\"adcCurr\":" + String(sensorReady ? analogReadMilliVolts(PIN_CURRENT) : 0) +
                 ",\"adcMax\":" + String(adcMax) +
+                ",\"adcMin\":" + String(adcMin) +
                 ",\"ampCurr\":" + String(sensorReady ? String(fabsf(adcToAmps(analogReadMilliVolts(PIN_CURRENT))), 3) : "0") +
                 ",\"ampMax\":" + String(ampMax, 3) +
+                ",\"ampMin\":" + String(ampMin, 3) +
                 ",\"peaks\":[";
   for (int i = 0; i < 16; i++) {
     json += String(channelPeak[i]);
@@ -685,18 +691,32 @@ void loop() {
       uint32_t now = millis();
       if (now - adcMaxTime > 5000) {
           adcMax = 0;          // reset window
+          adcMin = 0xFFFFFFFF;  // reset window
           adcMaxTime = now;
+          adcMinTime = now;
       }
       if (mv > adcMax) {
           adcMax = mv;        // track peak within window (in mV)
+          adcMaxTime = now;
+      }
+      if (mv < adcMin || adcMin == 0xFFFFFFFF) {
+          adcMin = mv;        // track min within window (in mV)
+          adcMinTime = now;
       }
       float amps = fabsf(adcToAmps(mv));
       if (now - ampMaxTime > 5000) {
           ampMax = 0.0f;
+          ampMin = 0.0f;
           ampMaxTime = now;
+          ampMinTime = now;
       }
       if (amps > ampMax) {
           ampMax = amps;
+          ampMaxTime = now;
+      }
+      if (amps < ampMin || ampMin == 0.0f) {
+          ampMin = amps;
+          ampMinTime = now;
       }
     }
 
