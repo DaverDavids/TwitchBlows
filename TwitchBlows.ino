@@ -84,7 +84,7 @@ int subCount = 0;
 bool     sensorReady = false;   // set true after boot check passes
 uint32_t currentSenseDelayMs = 10;  // ms to wait after firing before reading ADC
 int     adcMax = 0;            // max ADC reading in last 5 seconds (mV)
-int     adcMin = 0;            // min ADC reading in last 5 seconds (mV)
+uint32_t adcMin = 0xFFFFFFFF; // min ADC reading in last 5 seconds (mV)
 uint32_t adcMaxTime = 0;      // timestamp when adcMax was recorded
 uint32_t adcMinTime = 0;    // timestamp when adcMin was recorded
 float   ampMax = 0.0f;       // max amperage in last 5 seconds
@@ -757,7 +757,7 @@ void loop() {
       float amps = fabsf(adcToAmps(mv));
       if (now - ampMaxTime > 5000) {
           ampMax = 0.0f;
-          ampMin = 0.0f;
+          ampMin = 1e9f;    // use a large sentinel, not 0.0f
           ampMaxTime = now;
           ampMinTime = now;
       }
@@ -765,7 +765,7 @@ void loop() {
           ampMax = amps;
           ampMaxTime = now;
       }
-      if (amps < ampMin || ampMin == 0.0f) {
+      if (amps < ampMin) {  // remove the || ampMin == 0.0f guard entirely
           ampMin = amps;
           ampMinTime = now;
       }
@@ -789,10 +789,15 @@ void loop() {
     if (!pulseActive && fireQueueHead != fireQueueTail) {
       uint32_t now = millis();
       if (now - lastFireTime >= minGapMs) {
-        fireQueueHead = (fireQueueHead + 1) % FIRE_QUEUE_SIZE;
-        lastFireTime = now;
         webLog("[QUEUE] Dequeuing trigger — firing");
-        fireNextOutput(pulseDurMs);
+        int result = fireNextOutput(pulseDurMs);
+        if (result >= 0) {
+          fireQueueHead = (fireQueueHead + 1) % FIRE_QUEUE_SIZE;
+          lastFireTime = now;
+        } else {
+          webLog("[QUEUE] Fire failed — clearing queue");
+          fireQueueHead = fireQueueTail;
+        }
       }
     }
 
