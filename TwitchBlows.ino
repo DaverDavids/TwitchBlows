@@ -21,6 +21,7 @@
 #include <DNSServer.h>
 #include <Preferences.h>
 #include <Secrets.h>
+#include <time.h>
 #include "html.h"
 
 // ── Configuration ─────────────────────────────
@@ -97,19 +98,37 @@ bool evPointsEnabled = true;
 bool evSubsEnabled   = false;
 bool evRaidsEnabled  = false;
 
+// ── Fire queue + rate limiting ─────────────────
+#define FIRE_QUEUE_SIZE 16
+int8_t  fireQueue[FIRE_QUEUE_SIZE];
+int     fireQueueHead = 0;
+int     fireQueueTail = 0;
+
+uint32_t minGapMs     = 2000;   // min ms between fires (configurable)
+uint32_t lastFireTime = 0;      // timestamp of last fire
+
 // Channel points reward ID filter (empty = trigger on ALL redemptions)
 String pointsRewardFilter = "";
 
 // ── Web console log buffer ─────────────────────
-#define LOG_LINES 40
-#define LOG_WIDTH 120
+#define LOG_LINES 120
+#define LOG_WIDTH 160
 char logBuf[LOG_LINES][LOG_WIDTH];
 int  logHead = 0;
 int  logCount = 0;
 
 void webLog(const String& msg) {
-  DPRINTLN(msg);
-  msg.toCharArray(logBuf[logHead], LOG_WIDTH - 1);
+  struct tm ti;
+  char ts[22];
+  if (getLocalTime(&ti, 0)) {
+    snprintf(ts, sizeof(ts), "[%02d:%02d:%02d] ", ti.tm_hour, ti.tm_min, ti.tm_sec);
+  } else {
+    uint32_t s = millis() / 1000;
+    snprintf(ts, sizeof(ts), "[+%lus] ", s);
+  }
+  String stamped = String(ts) + msg;
+  DPRINTLN(stamped);
+  stamped.toCharArray(logBuf[logHead], LOG_WIDTH - 1);
   logBuf[logHead][LOG_WIDTH - 1] = '\0';
   logHead = (logHead + 1) % LOG_LINES;
   if (logCount < LOG_LINES) logCount++;
@@ -187,7 +206,6 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     }
 
     shiftWriteEnabled((uint16_t)(1u << q));
-    webLog("[FIRE] Ch" + String(q+1) + " — firing output...");
 
     // Sample peak deviation from midpoint over sense window
     float peakAmps = 0.0f;
@@ -199,27 +217,36 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     }
     channelPeak[q] = (int)(peakAmps * 1000.0f);  // store as mA
 
-    webLog("[SENSE] Ch" + String(q+1) + " peak=" + String(peakAmps, 3) + "A");
-
     // Deviation check: voltage must move >0.35V from midpoint
     float csThreshAmps = CS_DETECT_AMPS;
     if (peakAmps < csThreshAmps) {
       disableOutputs();
       usedOutputs |= (uint16_t)(1u << q);
-      webLog("[FIRE] Ch" + String(q+1) + " DEAD (" + String(peakAmps,3) + "A < " + String(csThreshAmps,3) + "A)");
+      webLog("[Ch" + String(q+1) + "] peak=" + String(peakAmps,3) + "A — DEAD");
       continue;
     }
 
     // Use safePulse for guaranteed single-output, always-off-after
     safePulse(q, pulseDurationMs);
     pendingUsedQ = q;
-    webLog("[FIRE] Ch" + String(q+1) + " CONFIRMED LIVE — firing " + String(pulseDurationMs) + "ms");
+    webLog("[Ch" + String(q+1) + "] peak=" + String(peakAmps,3) + "A — FIRING " + String(pulseDurationMs) + "ms");
     return q;
   }
 
   webLog("[FIRE] All 16 outputs exhausted");
   disableOutputs();
   return -1;
+}
+
+void queueFire() {
+  int next = (fireQueueTail + 1) % FIRE_QUEUE_SIZE;
+  if (next == fireQueueHead) {
+    webLog("[QUEUE] Full — trigger dropped");
+    return;
+  }
+  fireQueue[fireQueueTail] = 1;  // value is a token; just enqueue a 1
+  fireQueueTail = next;
+  webLog("[QUEUE] Trigger enqueued (" + String((fireQueueTail - fireQueueHead + FIRE_QUEUE_SIZE) % FIRE_QUEUE_SIZE) + " pending)");
 }
 
 // ── JSON response helper ────────────────────────
@@ -404,6 +431,14 @@ void parseTwitchMessage(const String& msg) {
   String bitsStr = extractTag(msg, "bits");
   String rewardId = extractTag(msg, "custom-reward-id");
 
+  // Bot detection
+  static const char* knownBots[] = {"Nightbot","StreamElements","Moobot","Fossabot","Streamlabs","CommanderRoot",nullptr};
+  bool isBot = false;
+  for (int i = 0; knownBots[i] != nullptr; i++) {
+    if (user.equalsIgnoreCase(knownBots[i])) { isBot = true; break; }
+  }
+  if (isBot) { webLog("[IRC] (bot) " + user + " ignored"); return; }
+
   if (bitsStr.length() > 0 && bitsStr != "0") {
     webLog("[IRC] BITS event — user=" + user + " bits=" + bitsStr);
   }
@@ -425,7 +460,7 @@ void parseTwitchMessage(const String& msg) {
     int bitsCount = bitsStr.toInt();
     if (bitsCount > 0 && bitsCount >= bitsThreshold) {
       webLog("[TRIGGER] BITS (" + String(bitsCount) + ") >= " + String(bitsThreshold) + " — firing output");
-      fireNextOutput(pulseDurMs);
+      queueFire();
     }
   }
 
@@ -436,7 +471,7 @@ void parseTwitchMessage(const String& msg) {
       if (pointsRedemptionCount >= pointsThreshold) {
         pointsRedemptionCount = 0;
         webLog("[TRIGGER] CHANNEL POINTS threshold met — firing output");
-        fireNextOutput(pulseDurMs);
+        queueFire();
       }
     } else {
       webLog("[IRC] Channel points reward " + rewardId + " does not match filter — ignored");
@@ -449,7 +484,7 @@ void parseTwitchMessage(const String& msg) {
     if (subCount >= subsThreshold) {
       subCount = 0;
       webLog("[TRIGGER] SUB threshold met — firing output");
-      fireNextOutput(pulseDurMs);
+      queueFire();
     }
   }
 
@@ -458,7 +493,7 @@ void parseTwitchMessage(const String& msg) {
     webLog("[IRC] RAID from " + user + " viewers=" + String(viewers) + " thresh=" + String(raidThreshold));
     if (viewers >= raidThreshold) {
       webLog("[TRIGGER] RAID threshold met — firing output");
-      fireNextOutput(pulseDurMs);
+      queueFire();
     }
   }
 }
@@ -493,7 +528,15 @@ void handleTwitchIRC() {
     if (line.length() == 0) continue;
 
     if (!line.startsWith("PING") && !line.startsWith(":tmi.twitch.tv 00")) {
-      webLog("[IRC] " + line);
+      // Drop raw tag-dump lines (start with @badge)
+      if (!line.startsWith("@badge")) {
+        // For PRIVMSG/USERNOTICE, only log the parsed summary (done in parseTwitchMessage)
+        // For other server messages, log a truncated version
+        if (line.indexOf("PRIVMSG") < 0 && line.indexOf("USERNOTICE") < 0) {
+          String shortened = line.substring(0, min((int)line.length(), 80));
+          webLog("[IRC] " + shortened);
+        }
+      }
     }
 
     if (line.startsWith("PING")) {
@@ -540,6 +583,10 @@ void handleSaveCfg() {
     int d = server.arg("cs_delay_ms").toInt();
     if (d >= 1 && d <= 500) currentSenseDelayMs = d;
   }
+  if (server.hasArg("min_gap_ms")) {
+    int g = server.arg("min_gap_ms").toInt();
+    if (g >= 0 && g <= 60000) minGapMs = g;
+  }
   if (server.hasArg("channel")) {
     String ch = server.arg("channel");
     ch.trim();
@@ -562,6 +609,7 @@ void handleSaveCfg() {
   prefs.putInt("raidThresh", raidThreshold);
   prefs.putUInt("pulseDurMs",  pulseDurMs);
   prefs.putUInt("csDelayMs",  currentSenseDelayMs);
+  prefs.putUInt("minGapMs",   minGapMs);
   prefs.putString("channel",   twitchChannel);
   prefs.putBool("evBits",    evBitsEnabled);
   prefs.putBool("evPoints",  evPointsEnabled);
@@ -581,7 +629,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + "}";
   sendJSON(200, json);
 }
 
@@ -649,6 +697,8 @@ void setup() {
     }
     setupOTA();
 
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
     prefs.begin("twitch", true);
     bitsThreshold = prefs.getInt("bitsThreshold", 100);
     pointsThreshold = prefs.getInt("pointsThresh", 1);
@@ -656,6 +706,7 @@ void setup() {
     raidThreshold = prefs.getInt("raidThresh", 10);
     pulseDurMs   = prefs.getUInt("pulseDurMs", 500);
     currentSenseDelayMs = prefs.getUInt("csDelayMs", 10);
+    minGapMs     = prefs.getUInt("minGapMs", 2000);
     twitchChannel = prefs.getString("channel", "daverdavid");
     evBitsEnabled   = prefs.getBool("evBits",   true);
     evPointsEnabled = prefs.getBool("evPoints", true);
@@ -732,6 +783,17 @@ void loop() {
         pendingUsedQ = -1;
       }
       webLog("[FIRE] Ch pulse ended — output OFF");
+    }
+
+    // Fire queue processor — respects rate limit and waits for pulse to finish
+    if (!pulseActive && fireQueueHead != fireQueueTail) {
+      uint32_t now = millis();
+      if (now - lastFireTime >= minGapMs) {
+        fireQueueHead = (fireQueueHead + 1) % FIRE_QUEUE_SIZE;
+        lastFireTime = now;
+        webLog("[QUEUE] Dequeuing trigger — firing");
+        fireNextOutput(pulseDurMs);
+      }
     }
 
     // Twitch IRC — connect in background, then poll with auto-reconnect

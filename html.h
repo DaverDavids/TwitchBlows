@@ -788,7 +788,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       btn.classList.remove('active-pulse');
       const bar = btn.querySelector('.pulse-bar');
       if (bar) bar.remove();
-      document.getElementById('sub' + q).textContent = '\u2014';
+       document.getElementById('sub' + q).textContent = btn.dataset.peak || '\u2014';
     }
   }
 
@@ -908,9 +908,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         // Update peak ADC values in button sub-labels
         if (data.peaks) {
           for (let i = 0; i < 16; i++) {
-            const sub = document.getElementById('sub' + i);
-            if (sub && data.peaks[i] > 0 && !sub.textContent.includes('ON')) {
-              sub.textContent = data.peaks[i] + 'mA';
+            const btn = document.getElementById('btn' + i);
+            if (data.peaks[i] > 0) {
+              btn.dataset.peak = (data.peaks[i] / 1000).toFixed(2) + 'A';
+              const sub = document.getElementById('sub' + i);
+              if (!pulseTimers[i] && i !== activeQ) {
+                sub.textContent = btn.dataset.peak;
+              }
             }
           }
         }
@@ -994,15 +998,20 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   // ── Console polling ───────────────────────────
   let consoleSeen = '';
+  let consoleLines = [];
+  const CONSOLE_MAX = 500;
   function pollLog() {
     fetch('/log')
       .then(r => r.text())
       .then(txt => {
         if (txt !== consoleSeen) {
           consoleSeen = txt;
+          consoleLines = txt.split('\n').filter(l => l.length > 0);
+          if (consoleLines.length > CONSOLE_MAX) consoleLines = consoleLines.slice(-CONSOLE_MAX);
           const el = document.getElementById('console');
-          el.textContent = txt;
-          el.scrollTop = el.scrollHeight;
+          const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          el.textContent = consoleLines.join('\n');
+          if (atBottom) el.scrollTop = el.scrollHeight;
         }
       })
       .catch(() => {});
@@ -1010,6 +1019,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function clearConsole() {
     document.getElementById('console').textContent = '';
     consoleSeen = '';
+    consoleLines = [];
   }
 
   // ── Init ──────────────────────────────────
