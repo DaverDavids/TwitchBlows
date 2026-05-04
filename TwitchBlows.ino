@@ -162,12 +162,16 @@ void shiftWrite(uint16_t val) {
   digitalWrite(PIN_LATCH, HIGH);
 }
 
+// Safe sequence: OE HIGH (tri-state) → shift data → latch → OE LOW (enable).
+// This guarantees outputs are never live during shifting and only one clean
+// output is ever driven — no glitch from stale OE state or latch-before-OE race.
 void shiftWriteEnabled(uint16_t val) {
+  digitalWrite(PIN_OE, HIGH);                                    // tri-state outputs before touching shift register
   digitalWrite(PIN_LATCH, LOW);
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);  // IC2 data (Ch9-16)
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);          // IC1 data (Ch1-8)
-  digitalWrite(PIN_LATCH, HIGH);
-  if (val != 0) digitalWrite(PIN_OE, LOW);
+  digitalWrite(PIN_LATCH, HIGH);                                 // latch new data while OE is still HIGH (safe)
+  if (val != 0) digitalWrite(PIN_OE, LOW);                       // now enable — exactly one bit is live
 }
 
 void disableOutputs() {
