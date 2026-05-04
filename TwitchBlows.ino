@@ -25,19 +25,19 @@
 #include "html.h"
 
 // ── Configuration ─────────────────────────────
-#define HOSTNAME      "twitchblows"
+#define HOSTNAME      "twitchblowsv3"
 #define WIFI_TIMEOUT  5000      // ms to wait for STA connection
 #define AP_SSID       HOSTNAME   // Captive portal AP name
 
 // SN74HC595 pins (adjust to your wiring)
-#define PIN_DATA      4    // DS   (SER)   → 595 pin 14
-#define PIN_CLOCK     6    // SRCLK        → 595 pin 11
-#define PIN_LATCH     5    // RCLK (ST_CP) → 595 pin 12
+#define PIN_DATA      1    // DS   (SER)   → 595 pin 14
+#define PIN_CLOCK     4    // SRCLK        → 595 pin 11
+#define PIN_LATCH     2    // RCLK (ST_CP) → 595 pin 12
 #define PIN_OE        3    // OE  (active-low) → 595 pin 13
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 
-#define PIN_CURRENT   2
+#define PIN_CURRENT   0
 
 // Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
 #define CS_MIDPOINT_V     2.5f   // V at zero current (tune to your sensor's actual idle reading)
