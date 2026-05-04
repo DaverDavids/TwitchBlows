@@ -36,10 +36,16 @@
 #define PIN_OE        3    // OE  (active-low) → 595 pin 13
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
+//
+// Daisy-chain: ESP32 SER → IC1 SER (pin 14)
+//              IC1 QH' (pin 9) → IC2 SER (pin 14)
+// Bit mapping: val bit 0 = IC1 QA (Ch1) ... bit 7 = IC1 QH (Ch8)
+//              val bit 8 = IC2 QA (Ch9) ... bit 15 = IC2 QH (Ch16)
+// Low byte sent LAST so it ends up in IC1 (nearest to latch output).
 
 #define PIN_CURRENT   0
 
-// Current sensor calibration — ACS-style, midpoint ~1.65V on 3.3V/12-bit ADC
+// Current sensor calibration — ACS-style, midpoint ~2.5V on 3.3V/12-bit ADC
 #define CS_MIDPOINT_V     2.5f   // V at zero current (tune to your sensor's actual idle reading)
 #define CS_MV_PER_AMP    -100.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
@@ -88,7 +94,7 @@ uint32_t adcMin = 0xFFFFFFFF; // min ADC reading in last 5 seconds (mV)
 uint32_t adcMaxTime = 0;      // timestamp when adcMax was recorded
 uint32_t adcMinTime = 0;    // timestamp when adcMin was recorded
 float   ampMax = 0.0f;       // max amperage in last 5 seconds
-float   ampMin = 0.0f;        // min amperage in last 5 seconds
+float   ampMin = 1e9f;        // min amperage in last 5 seconds (large sentinel)
 uint32_t ampMaxTime = 0;     // timestamp when ampMax was recorded
 uint32_t ampMinTime = 0;    // timestamp when ampMin was recorded
 
@@ -146,19 +152,23 @@ void handleLog() {
 }
 
 // ── 595 helper ────────────────────────────────
+// Byte order: HIGH byte (IC2, Ch9-16) clocked in FIRST — gets shifted
+// through to IC2 as IC1 data arrives. LOW byte (IC1, Ch1-8) clocked LAST
+// so it lands in IC1. This matches bit mapping: bit 0 = Ch1 on IC1.
 void shiftWrite(uint16_t val) {
   digitalWrite(PIN_LATCH, LOW);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);  // IC2 data (Ch9-16)
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);          // IC1 data (Ch1-8)
   digitalWrite(PIN_LATCH, HIGH);
 }
 
 void shiftWriteEnabled(uint16_t val) {
-  digitalWrite(PIN_LATCH, LOW);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);
-  digitalWrite(PIN_LATCH, HIGH);
+  // Assert OE LOW before latch pulse so outputs enable atomically with data.
   if (val != 0) digitalWrite(PIN_OE, LOW);
+  digitalWrite(PIN_LATCH, LOW);
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);  // IC2 data (Ch9-16)
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);          // IC1 data (Ch1-8)
+  digitalWrite(PIN_LATCH, HIGH);
 }
 
 void disableOutputs() {
@@ -217,7 +227,7 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     }
     channelPeak[q] = (int)(peakAmps * 1000.0f);  // store as mA
 
-    // Deviation check: voltage must move >0.35V from midpoint
+    // Deviation check: voltage must move enough from midpoint
     float csThreshAmps = CS_DETECT_AMPS;
     if (peakAmps < csThreshAmps) {
       disableOutputs();
@@ -746,7 +756,7 @@ void loop() {
           adcMaxTime = now;
           adcMinTime = now;
       }
-      if (mv > adcMax) {
+      if (mv > (uint32_t)adcMax) {
           adcMax = mv;        // track peak within window (in mV)
           adcMaxTime = now;
       }
@@ -757,7 +767,7 @@ void loop() {
       float amps = fabsf(adcToAmps(mv));
       if (now - ampMaxTime > 5000) {
           ampMax = 0.0f;
-          ampMin = 1e9f;    // use a large sentinel, not 0.0f
+          ampMin = 1e9f;    // large sentinel — not 0.0f
           ampMaxTime = now;
           ampMinTime = now;
       }
@@ -765,7 +775,7 @@ void loop() {
           ampMax = amps;
           ampMaxTime = now;
       }
-      if (amps < ampMin) {  // remove the || ampMin == 0.0f guard entirely
+      if (amps < ampMin) {
           ampMin = amps;
           ampMinTime = now;
       }
