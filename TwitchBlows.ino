@@ -163,12 +163,11 @@ void shiftWrite(uint16_t val) {
 }
 
 void shiftWriteEnabled(uint16_t val) {
-  // Assert OE LOW before latch pulse so outputs enable atomically with data.
-  if (val != 0) digitalWrite(PIN_OE, LOW);
   digitalWrite(PIN_LATCH, LOW);
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);  // IC2 data (Ch9-16)
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);          // IC1 data (Ch1-8)
   digitalWrite(PIN_LATCH, HIGH);
+  if (val != 0) digitalWrite(PIN_OE, LOW);
 }
 
 void disableOutputs() {
@@ -236,8 +235,11 @@ int fireNextOutput(uint32_t pulseDurationMs) {
       continue;
     }
 
-    // Use safePulse for guaranteed single-output, always-off-after
-    safePulse(q, pulseDurationMs);
+    // Output already enabled from shiftWriteEnabled above — set pulse state directly
+    pulseActive = true;
+    pulseQ      = q;
+    activeQ     = q;
+    pulseEnd    = millis() + pulseDurationMs;
     pendingUsedQ = q;
     webLog("[Ch" + String(q+1) + "] peak=" + String(peakAmps,3) + "A — FIRING " + String(pulseDurationMs) + "ms");
     return q;
