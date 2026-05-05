@@ -206,9 +206,7 @@ void shiftWriteEnabled(uint16_t val) {
   digitalWrite(PIN_OE, HIGH);                   // tri-state outputs before touching shift register
   digitalWrite(PIN_LATCH, LOW);
   delayMicroseconds(5);                         // let latch settle (595 setup time)
-  // Clear shift register fully before writing new data
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
+  // Write exactly 16 bits — this fully replaces previous register contents
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, hi);  // IC2 data (Ch9-16)
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, lo);  // IC1 data (Ch1-8)
   digitalWrite(PIN_LATCH, HIGH);                // latch new data while OE is still HIGH (safe)
