@@ -33,7 +33,7 @@
 #define PIN_DATA      1    // DS   (SER)   → 595 pin 14
 #define PIN_CLOCK     4    // SRCLK        → 595 pin 11
 #define PIN_LATCH     2    // RCLK (ST_CP) → 595 pin 12
-#define PIN_OE        3    // OE  (active-low) → 595 pin 13
+#define PIN_OE        5    // OE  (active-low) → 595 pin 13
 //           595 pin 10 (SRCLR)→ VCC  (active-low clear, keep high)
 //           595 VCC            → 3.3V (match ESP32-C3 logic levels)
 //
