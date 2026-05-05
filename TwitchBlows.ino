@@ -151,14 +151,48 @@ void handleLog() {
   server.send(200, "text/plain", out);
 }
 
+// ── Shift register serial debug helper ────────
+// Prints the exact bytes being sent to the 595s at the moment they are clocked.
+// Called with the actual variables passed to shiftOut — not recalculated values.
+#if DEBUG
+static void debugShiftBytes(const char* label, uint8_t hi, uint8_t lo) {
+  // Format: [595] label  HI=0bXXXXXXXX (0xHH) [IC2 Ch9-16]  LO=0bXXXXXXXX (0xLL) [IC1 Ch1-8]
+  char hiBin[9], loBin[9];
+  for (int i = 7; i >= 0; i--) {
+    hiBin[7 - i] = (hi & (1 << i)) ? '1' : '0';
+    loBin[7 - i] = (lo & (1 << i)) ? '1' : '0';
+  }
+  hiBin[8] = '\0';
+  loBin[8] = '\0';
+  Serial.print("[595] ");
+  Serial.print(label);
+  Serial.print("  HI=0b");
+  Serial.print(hiBin);
+  Serial.print(" (0x");
+  if (hi < 0x10) Serial.print("0");
+  Serial.print(hi, HEX);
+  Serial.print(") [IC2 Ch9-16]  LO=0b");
+  Serial.print(loBin);
+  Serial.print(" (0x");
+  if (lo < 0x10) Serial.print("0");
+  Serial.print(lo, HEX);
+  Serial.println(") [IC1 Ch1-8]");
+}
+#else
+  #define debugShiftBytes(label, hi, lo)
+#endif
+
 // ── 595 helper ────────────────────────────────
 // Byte order: HIGH byte (IC2, Ch9-16) clocked in FIRST — gets shifted
 // through to IC2 as IC1 data arrives. LOW byte (IC1, Ch1-8) clocked LAST
 // so it lands in IC1. This matches bit mapping: bit 0 = Ch1 on IC1.
 void shiftWrite(uint16_t val) {
+  uint8_t hi = (val >> 8) & 0xFF;
+  uint8_t lo = val & 0xFF;
+  debugShiftBytes("shiftWrite      ", hi, lo);
   digitalWrite(PIN_LATCH, LOW);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);  // IC2 data (Ch9-16)
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);          // IC1 data (Ch1-8)
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, hi);  // IC2 data (Ch9-16)
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, lo);  // IC1 data (Ch1-8)
   digitalWrite(PIN_LATCH, HIGH);
 }
 
@@ -166,15 +200,19 @@ void shiftWrite(uint16_t val) {
 // This guarantees outputs are never live during shifting and only one clean
 // output is ever driven — no glitch from stale OE state or latch-before-OE race.
 void shiftWriteEnabled(uint16_t val) {
-  digitalWrite(PIN_OE, HIGH);                                    // tri-state outputs before touching shift register
+  uint8_t hi = (val >> 8) & 0xFF;
+  uint8_t lo = val & 0xFF;
+  debugShiftBytes("shiftWriteEnabled", hi, lo);
+  digitalWrite(PIN_OE, HIGH);                   // tri-state outputs before touching shift register
   digitalWrite(PIN_LATCH, LOW);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, (val >> 8) & 0xFF);  // IC2 data (Ch9-16)
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, val & 0xFF);          // IC1 data (Ch1-8)
-  digitalWrite(PIN_LATCH, HIGH);                                 // latch new data while OE is still HIGH (safe)
-  if (val != 0) digitalWrite(PIN_OE, LOW);                       // now enable — exactly one bit is live
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, hi);  // IC2 data (Ch9-16)
+  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, lo);  // IC1 data (Ch1-8)
+  digitalWrite(PIN_LATCH, HIGH);                // latch new data while OE is still HIGH (safe)
+  if (val != 0) digitalWrite(PIN_OE, LOW);      // now enable — exactly one bit is live
 }
 
 void disableOutputs() {
+  debugShiftBytes("disableOutputs  ", 0x00, 0x00);
   digitalWrite(PIN_OE, HIGH);
   digitalWrite(PIN_LATCH, LOW);
   shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
