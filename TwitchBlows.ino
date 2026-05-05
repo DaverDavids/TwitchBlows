@@ -239,6 +239,7 @@ void safePulse(int8_t q, uint32_t ms) {
   shiftWriteEnabled((uint16_t)(1u << q));
   pulseActive = true;
   pulseQ      = q;
+  activeQ     = q;
   pulseEnd    = millis() + ms;
   webLog("[FIRE] Ch" + String(q+1) + " ON for " + String(ms) + "ms");
 }
