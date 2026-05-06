@@ -50,6 +50,26 @@
 #define CS_MV_PER_AMP    -100.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
 
+// ── ADC Moving Average ────────────────────────
+#define ADC_MA_SAMPLES 5   // number of samples for moving average (default 5)
+
+static uint32_t _adcMaBuf[ADC_MA_SAMPLES] = {0};
+static uint8_t  _adcMaIdx = 0;
+static bool     _adcMaFilled = false;
+
+// Returns a simple moving average of analogReadMilliVolts(PIN_CURRENT)
+uint32_t adcReadMvAvg() {
+  _adcMaBuf[_adcMaIdx] = analogReadMilliVolts(PIN_CURRENT);
+  _adcMaIdx = (_adcMaIdx + 1) % ADC_MA_SAMPLES;
+  if (_adcMaIdx == 0) _adcMaFilled = true;
+
+  uint8_t count = _adcMaFilled ? ADC_MA_SAMPLES : _adcMaIdx;
+  if (count == 0) return _adcMaBuf[0];  // safety guard
+  uint32_t sum = 0;
+  for (uint8_t i = 0; i < count; i++) sum += _adcMaBuf[i];
+  return sum / count;
+}
+
 // ── Globals ───────────────────────────────────
 WebServer   server(80);
 DNSServer   dns;
@@ -265,7 +285,7 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     float peakAmps = 0.0f;
     uint32_t senseStart = millis();
     while (millis() - senseStart < currentSenseDelayMs) {
-      int mv = analogReadMilliVolts(PIN_CURRENT);
+      int mv = adcReadMvAvg();  // moving average read
       float a = fabsf(adcToAmps(mv));
       if (a > peakAmps) peakAmps = a;
     }
@@ -407,10 +427,10 @@ void handleState() {
                 ",\"pulseDurMs\":" + String(pulseDurMs) +
                 ",\"nextQ\":"   + String(nextOutput) +
                 ",\"sensorOK\":" + String(sensorReady ? "true" : "false") +
-                ",\"adcCurr\":" + String(sensorReady ? analogReadMilliVolts(PIN_CURRENT) : 0) +
+                ",\"adcCurr\":" + String(sensorReady ? adcReadMvAvg() : 0) +
                 ",\"adcMax\":" + String(adcMax) +
                 ",\"adcMin\":" + String(adcMin) +
-                ",\"ampCurr\":" + String(sensorReady ? String(fabsf(adcToAmps(analogReadMilliVolts(PIN_CURRENT))), 3) : "0") +
+                ",\"ampCurr\":" + String(sensorReady ? String(fabsf(adcToAmps(adcReadMvAvg())), 3) : "0") +
                 ",\"ampMax\":" + String(ampMax, 3) +
                 ",\"ampMin\":" + String(ampMin, 3) +
                 ",\"peaks\":[";
@@ -728,7 +748,9 @@ void setup() {
 
   // Confirm current sensor is present and idle (expect ~CS_MIDPOINT_V ±0.5V)
   delay(50);
-  uint32_t csIdleMv = analogReadMilliVolts(PIN_CURRENT);
+  // Pre-fill the moving average buffer so the first real read is already averaged
+  for (uint8_t i = 0; i < ADC_MA_SAMPLES; i++) adcReadMvAvg();
+  uint32_t csIdleMv = adcReadMvAvg();
   float csIdleV = csIdleMv / 1000.0f;
   bool sensorOK = (csIdleV >= CS_MIDPOINT_V - 0.5f && csIdleV <= CS_MIDPOINT_V + 0.5f);
   webLog("[BOOT] CS idle=" + String(csIdleV, 3) + "V (expect " + String(CS_MIDPOINT_V, 2) + "V) " + (sensorOK ? "OK" : "SENSOR FAULT — outputs DISABLED"));
@@ -795,7 +817,7 @@ void loop() {
 
     // Continuous ADC monitoring — track max over 5 seconds
     if (sensorReady) {
-      uint32_t mv = analogReadMilliVolts(PIN_CURRENT);
+      uint32_t mv = adcReadMvAvg();  // moving average read
       uint32_t now = millis();
       if (now - adcMaxTime > 5000) {
           adcMax = 0;          // reset window
