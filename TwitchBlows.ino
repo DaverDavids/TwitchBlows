@@ -85,8 +85,10 @@ uint32_t pulseEnd    = 0;
 
 // Output tracking
 uint16_t usedOutputs = 0;       // bitmask: bit N=1 means output N is dead/used
+uint16_t manualDisableMask = 0; // bitmask: bit N=1 means channel N manually disabled
 int      nextOutput  = 0;       // rolling pointer for next untried output
-int      channelPeak[16] = {0}; // last measured ADC peak per channel
+int      channelPeak[16] = {0}; // last measured peak per channel (mA)
+float    channelAmpMax[16] = {0.0f}; // session max amps per channel
 int8_t  pendingUsedQ = -1;     // channel to mark used when pulse ends
 
 // Twitch IRC
@@ -257,6 +259,20 @@ void safePulse(int8_t q, uint32_t ms) {
   if (q < 0 || q > 15) return;
 
   shiftWriteEnabled((uint16_t)(1u << q));
+
+  // Sense peak deviation from midpoint
+  float peakAmps = 0.0f;
+  if (sensorReady) {
+    uint32_t senseStart = millis();
+    while (millis() - senseStart < currentSenseDelayMs) {
+      int mv = adcReadMvAvg();
+      float a = fabsf(adcToAmps(mv));
+      if (a > peakAmps) peakAmps = a;
+    }
+  }
+  channelPeak[q] = (int)(peakAmps * 1000.0f);
+  channelAmpMax[q] = max(channelAmpMax[q], peakAmps);
+
   pulseActive = true;
   pulseQ      = q;
   activeQ     = q;
@@ -278,6 +294,10 @@ int fireNextOutput(uint32_t pulseDurationMs) {
       webLog("[FIRE] Ch" + String(q+1) + " already used — skip");
       continue;
     }
+    if (manualDisableMask & (uint16_t)(1u << q)) {
+      webLog("[FIRE] Ch" + String(q+1) + " manually disabled — skip");
+      continue;
+    }
 
     shiftWriteEnabled((uint16_t)(1u << q));
 
@@ -290,6 +310,7 @@ int fireNextOutput(uint32_t pulseDurationMs) {
       if (a > peakAmps) peakAmps = a;
     }
     channelPeak[q] = (int)(peakAmps * 1000.0f);  // store as mA
+    channelAmpMax[q] = max(channelAmpMax[q], peakAmps);
 
     // Deviation check: voltage must move enough from midpoint
     float csThreshAmps = CS_DETECT_AMPS;
@@ -433,13 +454,43 @@ void handleState() {
                 ",\"ampCurr\":" + String(sensorReady ? String(fabsf(adcToAmps(adcReadMvAvg())), 3) : "0") +
                 ",\"ampMax\":" + String(ampMax, 3) +
                 ",\"ampMin\":" + String(ampMin, 3) +
-                ",\"peaks\":[";
+                 ",\"peaks\":[";
   for (int i = 0; i < 16; i++) {
     json += String(channelPeak[i]);
     if (i < 15) json += ",";
   }
-  json += "]}";
+  json += "],\"ampPeaks\":[";
+  for (int i = 0; i < 16; i++) {
+    json += String(channelAmpMax[i], 3);
+    if (i < 15) json += ",";
+  }
+  json += "],\"disableMask\":" + String(manualDisableMask) + "}";
   sendJSON(200, json);
+}
+
+// /setchan?q=N&enabled=0/1 — enable or disable a channel
+void handleSetChan() {
+  if (!server.hasArg("q")) {
+    sendJSON(400, "{\"ok\":false,\"err\":\"missing q\"}");
+    return;
+  }
+  int q = server.arg("q").toInt();
+  if (q < 0 || q > 15) {
+    sendJSON(400, "{\"ok\":false,\"err\":\"q out of range\"}");
+    return;
+  }
+  bool enabled = !server.hasArg("enabled") || server.arg("enabled") == "1";
+  if (enabled) {
+    manualDisableMask &= ~(1u << q);
+  } else {
+    manualDisableMask |= (1u << q);
+  }
+  sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"enabled\":" + (enabled ? "true" : "false") + "}");
+}
+
+// /getchan — return current manualDisableMask
+void handleGetChan() {
+  sendJSON(200, "{\"disableMask\":" + String(manualDisableMask) + "}");
 }
 
 void handleSaveWifi() {
@@ -805,6 +856,8 @@ void setup() {
   server.on("/savecfg",    handleSaveCfg);
   server.on("/getcfg",     handleGetCfg);
   server.on("/log",       handleLog);
+  server.on("/setchan",   handleSetChan);
+  server.on("/getchan",   handleGetChan);
   server.onNotFound(     handleNotFound);
   server.begin();
   DPRINTLN("HTTP server started");

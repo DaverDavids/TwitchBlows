@@ -277,6 +277,37 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       font-weight: 700;
     }
 
+    .output-btn .q-amp {
+      font-size: 0.55rem;
+      font-family: var(--font-ui);
+      font-weight: 500;
+      opacity: 0.6;
+    }
+
+    .output-btn .q-toggle {
+      position: absolute;
+      bottom: 4px;
+      right: 6px;
+      font-size: 0.55rem;
+      cursor: pointer;
+      opacity: 0.4;
+      transition: opacity var(--transition);
+      background: none;
+      border: none;
+      color: var(--muted);
+      padding: 2px 4px;
+      line-height: 1;
+    }
+    .output-btn .q-toggle:hover { opacity: 1; color: var(--accent); }
+
+    .output-btn.disabled {
+      background: var(--surface);
+      border-color: var(--faint);
+      color: var(--faint);
+      opacity: 0.4;
+    }
+    .output-btn.disabled::before { background: var(--faint); opacity: 0.3; }
+
     @keyframes pulse-glow {
       from { box-shadow: 0 0 8px var(--amber-dim); }
       to   { box-shadow: 0 0 22px var(--amber); }
@@ -713,6 +744,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let pulseTimers = {};
   let pulseBars   = {};
   let usedMask    = 0;
+  let disableMask = 0;
   let twitchConn  = false;
   let nextQ      = 0;
 
@@ -725,7 +757,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     btn.setAttribute('aria-label', 'Channel ' + (i+1));
     btn.innerHTML =
       '<span class="q-label">Ch' + (i+1) + '</span>' +
-      '<span class="q-sub" id="sub' + i + '">&#8212;</span>';
+      '<span class="q-amp" id="amp' + i + '"></span>' +
+      '<span class="q-sub" id="sub' + i + '">&#8212;</span>' +
+      '<button class="q-toggle" id="tog' + i + '" onclick="event.stopPropagation(); toggleChan(' + i + ')" title="Toggle channel enable/disable">\u2713</button>';
     btn.onclick = () => handleBtnClick(i);
     grid.appendChild(btn);
   }
@@ -754,7 +788,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   // ── Button click ──────────────────────────
   function handleBtnClick(i) {
     const btn = document.getElementById('btn' + i);
-    if (btn && btn.classList.contains('dead')) return;
+    if (btn && (btn.classList.contains('dead') || btn.classList.contains('disabled'))) return;
     if (mode === 'toggle') {
       sendSet(activeQ === i ? -1 : i);
     } else {
@@ -811,6 +845,34 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     pulseTimers[q] = setTimeout(() => { cancelPulse(q); updateStatus(); }, ms + 300);
   }
 
+  // ── Channel enable/disable toggle ─────────────
+  function toggleChan(q) {
+    const enabled = !(disableMask & (1 << q));
+    fetch('/setchan?q=' + q + '&enabled=' + (enabled ? '1' : '0'))
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          if (enabled) {
+            disableMask &= ~(1 << q);
+          } else {
+            disableMask |= (1 << q);
+          }
+          updateDisableUI();
+        }
+      })
+      .catch(() => setStatusText('Error toggling channel'));
+  }
+
+  function updateDisableUI() {
+    for (let i = 0; i < 16; i++) {
+      const btn = document.getElementById('btn' + i);
+      const tog = document.getElementById('tog' + i);
+      const disabled = (disableMask & (1 << i)) !== 0;
+      if (btn) btn.classList.toggle('disabled', disabled);
+      if (tog) tog.textContent = disabled ? '\u2717' : '\u2713';
+    }
+  }
+
   // ── All off & reset used ─────────────────────────────
   function allOff() {
     for (let i = 0; i < 16; i++) cancelPulse(i);
@@ -845,7 +907,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     for (let i = 0; i < 16; i++) {
       const btn = document.getElementById('btn' + i);
       if (btn) {
-        btn.classList.toggle('next', i === nextQ && !btn.classList.contains('dead'));
+        btn.classList.toggle('next', i === nextQ && !btn.classList.contains('dead') && !btn.classList.contains('disabled'));
       }
     }
   }
@@ -917,6 +979,22 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
               }
             }
           }
+        }
+
+        // Update ampPeaks (session max amps)
+        if (data.ampPeaks) {
+          for (let i = 0; i < 16; i++) {
+            const ampEl = document.getElementById('amp' + i);
+            if (ampEl && data.ampPeaks[i] > 0) {
+              ampEl.textContent = data.ampPeaks[i].toFixed(2) + 'A';
+            }
+          }
+        }
+
+        // Update manual disable mask
+        if (data.disableMask !== undefined) {
+          disableMask = data.disableMask;
+          updateDisableUI();
         }
 
         updateToggleUI();
