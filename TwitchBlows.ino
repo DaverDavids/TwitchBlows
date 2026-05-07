@@ -51,7 +51,7 @@
 #define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
 
 // ── ADC Moving Average ────────────────────────
-#define ADC_MA_SAMPLES 50   // number of samples for moving average (default 5)
+#define ADC_MA_SAMPLES 10   // number of samples for moving average (default 5)
 
 static uint32_t _adcMaBuf[ADC_MA_SAMPLES] = {0};
 static uint8_t  _adcMaIdx = 0;
