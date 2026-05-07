@@ -781,10 +781,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function handleBtnClick(i) {
     const btn = document.getElementById('btn' + i);
     if (btn && btn.classList.contains('dead')) return;
-    if (btn && btn.classList.contains('disabled')) {
-      toggleChan(i); // re-enable on click
-      return;
-    }
+    if (btn && btn.classList.contains('disabled')) return;
     if (mode === 'toggle') {
       sendSet(activeQ === i ? -1 : i);
     } else {
@@ -843,22 +840,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
   // ── Channel enable/disable toggle ─────────────
   function toggleChan(q) {
-    const enabled = !(disableMask & (1 << q));
-    fetch('/setchan?q=' + q + '&enabled=' + (enabled ? '1' : '0'))
+    const currentlyEnabled = !(disableMask & (1 << q));
+    const newEnabled = !currentlyEnabled; // invert state
+
+    fetch('/setchan?q=' + q + '&enabled=' + (newEnabled ? '1' : '0'))
       .then(r => r.json())
       .then(data => {
         if (data.ok) {
-          if (enabled) {
-            disableMask &= ~(1 << q);
+          if (newEnabled) {
+            disableMask &= ~(1 << q); // clear bit = enabled
           } else {
-            disableMask |= (1 << q);
+            disableMask |= (1 << q);  // set bit = disabled
           }
           updateDisableUI();
         }
       })
       .catch(() => setStatusText('Error toggling channel'));
   }
-
+  
   function updateDisableUI() {
     for (let i = 0; i < 16; i++) {
       const btn = document.getElementById('btn' + i);
