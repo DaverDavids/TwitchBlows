@@ -223,12 +223,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .output-btn:active:not(.dead) { transform: scale(0.96); }
     .output-btn .q-label { font-size: 1.05rem; }
     .output-btn .q-sub {
-      font-size: 0.6rem;
+      font-size: 0.85rem;
       font-family: var(--font-ui);
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      opacity: 0.7;
+      font-weight: 600;
+      opacity: 0.85;
     }
 
     .output-btn::before {
@@ -740,7 +738,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     btn.id = 'btn' + i;
     btn.setAttribute('aria-label', 'Channel ' + (i+1));
     btn.innerHTML =
-      '<span class="q-label" id="label' + i + '">Ch' + (i+1) + '</span>' +
+      '<span class="q-label">Ch' + (i+1) + '</span>' +
       '<span class="q-sub" id="sub' + i + '">&#8212;</span>' +
       '<button class="q-toggle" id="tog' + i + '" onclick="event.stopPropagation(); toggleChan(' + i + ')" title="Mark channel dead/live">\u2713</button>';
     btn.onclick = () => handleBtnClick(i);
@@ -852,6 +850,16 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function allOff() {
     for (let i = 0; i < 16; i++) cancelPulse(i);
     sendSet(-1);
+    fetch('/disableall')
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          usedMask = 0xFFFF;
+          updateDeadUI();
+          setStatusText('All channels disabled');
+        }
+      })
+      .catch(() => {});
   }
 
   function resetUsed() {
@@ -958,17 +966,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
               if (!pulseTimers[i] && i !== activeQ) {
                 sub.textContent = btn.dataset.peak;
               }
-            }
-          }
-        }
-
-        // Update ampPeaks (session max amps) in button labels
-        if (data.ampPeaks) {
-          for (let i = 0; i < 16; i++) {
-            const labelEl = document.getElementById('label' + i);
-            if (labelEl) {
-              const amp = data.ampPeaks[i];
-              labelEl.textContent = 'Ch' + (i+1) + (amp > 0 ? ' (' + amp.toFixed(2) + 'A)' : '');
             }
           }
         }

@@ -707,8 +707,12 @@ void handleTwitchIRC() {
 // ── New web routes ─────────────────────────────
 void handleResetUsed() {
   usedOutputs = 0;
-  nextOutput  = 0;
-  pendingUsedQ = -1;
+  sendJSON(200, "{\"ok\":true}");
+}
+
+// /disableall — mark all 16 channels as dead
+void handleDisableAll() {
+  usedOutputs = 0xFFFF;
   sendJSON(200, "{\"ok\":true}");
 }
 
@@ -879,6 +883,7 @@ void setup() {
   server.on("/setchan",   handleSetChan);
   server.on("/getchan",   handleGetChan);
   server.on("/setdead",   handleSetDead);
+  server.on("/disableall", handleDisableAll);
   server.onNotFound(     handleNotFound);
   server.begin();
   DPRINTLN("HTTP server started");
