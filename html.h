@@ -293,14 +293,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
     .output-btn .q-toggle:hover { opacity: 1; color: var(--accent); }
 
-    .output-btn.disabled {
-      background: var(--surface);
-      border-color: var(--faint);
-      color: var(--faint);
-      opacity: 0.4;
-    }
-    .output-btn.disabled::before { background: var(--faint); opacity: 0.3; }
-
     @keyframes pulse-glow {
       from { box-shadow: 0 0 8px var(--amber-dim); }
       to   { box-shadow: 0 0 22px var(--amber); }
@@ -737,7 +729,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let pulseTimers = {};
   let pulseBars   = {};
   let usedMask    = 0;
-  let disableMask = 0;
   let twitchConn  = false;
   let nextQ      = 0;
 
@@ -751,7 +742,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     btn.innerHTML =
       '<span class="q-label" id="label' + i + '">Ch' + (i+1) + '</span>' +
       '<span class="q-sub" id="sub' + i + '">&#8212;</span>' +
-      '<button class="q-toggle" id="tog' + i + '" onclick="event.stopPropagation(); toggleChan(' + i + ')" title="Toggle channel enable/disable">\u2713</button>';
+      '<button class="q-toggle" id="tog' + i + '" onclick="event.stopPropagation(); toggleChan(' + i + ')" title="Mark channel dead/live">\u2713</button>';
     btn.onclick = () => handleBtnClick(i);
     grid.appendChild(btn);
   }
@@ -781,7 +772,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function handleBtnClick(i) {
     const btn = document.getElementById('btn' + i);
     if (btn && btn.classList.contains('dead')) return;
-    if (btn && btn.classList.contains('disabled')) return;
     if (mode === 'toggle') {
       sendSet(activeQ === i ? -1 : i);
     } else {
@@ -838,37 +828,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     pulseTimers[q] = setTimeout(() => { cancelPulse(q); updateStatus(); }, ms + 300);
   }
 
-  // ── Channel enable/disable toggle ─────────────
+  // ── Toggle dead state per channel ─────────────
   function toggleChan(q) {
-    const currentlyEnabled = !(disableMask & (1 << q));
-    const newEnabled = !currentlyEnabled; // invert state
+    const isDead = (usedMask & (1 << q)) !== 0;
+    const newDead = !isDead;
 
-    fetch('/setchan?q=' + q + '&enabled=' + (newEnabled ? '1' : '0'))
+    fetch('/setdead?q=' + q + '&dead=' + (newDead ? '1' : '0'))
       .then(r => r.json())
       .then(data => {
         if (data.ok) {
-          if (newEnabled) {
-            disableMask &= ~(1 << q); // clear bit = enabled
+          if (newDead) {
+            usedMask |= (1 << q);
           } else {
-            disableMask |= (1 << q);  // set bit = disabled
+            usedMask &= ~(1 << q);
           }
-          updateDisableUI();
+          updateDeadUI();
         }
       })
-      .catch(() => setStatusText('Error toggling channel'));
-  }
-  
-  function updateDisableUI() {
-    for (let i = 0; i < 16; i++) {
-      const btn = document.getElementById('btn' + i);
-      const tog = document.getElementById('tog' + i);
-      const disabled = (disableMask & (1 << i)) !== 0;
-      if (btn) {
-        btn.classList.toggle('disabled', disabled);
-        btn.title = disabled ? 'manually disabled' : 'Channel ' + (i+1);
-      }
-      if (tog) tog.textContent = disabled ? '\u2717' : '\u2713';
-    }
+      .catch(() => setStatusText('Error toggling dead state'));
   }
 
   // ── All off & reset used ─────────────────────────────
@@ -894,9 +871,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function updateDeadUI() {
     for (let i = 0; i < 16; i++) {
       const btn = document.getElementById('btn' + i);
-      if (btn) {
-        btn.classList.toggle('dead', (usedMask & (1 << i)) !== 0);
-      }
+      const tog = document.getElementById('tog' + i);
+      const dead = (usedMask & (1 << i)) !== 0;
+      if (btn) btn.classList.toggle('dead', dead);
+      if (tog) tog.textContent = dead ? '\u2717' : '\u2713';
     }
   }
 
@@ -905,7 +883,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     for (let i = 0; i < 16; i++) {
       const btn = document.getElementById('btn' + i);
       if (btn) {
-        btn.classList.toggle('next', i === nextQ && !btn.classList.contains('dead') && !btn.classList.contains('disabled'));
+        btn.classList.toggle('next', i === nextQ && !btn.classList.contains('dead'));
       }
     }
   }
@@ -965,7 +943,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           document.getElementById('amp-min').textContent = data.ampMin + 'A';
         }
 
-        // Update peak ADC values in button sub-labels
+        updateToggleUI();
+        updateDeadUI();
+        updateNextUI();
+        updateStatus();
+
+        // Update peak ADC values in button sub-labels (after UI defaults)
         if (data.peaks) {
           for (let i = 0; i < 16; i++) {
             const btn = document.getElementById('btn' + i);
@@ -989,17 +972,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             }
           }
         }
-
-        // Update manual disable mask
-        if (data.disableMask !== undefined) {
-          disableMask = data.disableMask;
-          updateDisableUI();
-        }
-
-        updateToggleUI();
-        updateDeadUI();
-        updateNextUI();
-        updateStatus();
 
         const td = document.getElementById('twitch-dot');
         td.className = 'twitch-dot' + (twitchConn ? ' connected' : '');

@@ -464,7 +464,7 @@ void handleState() {
     json += String(channelAmpMax[i], 3);
     if (i < 15) json += ",";
   }
-  json += "],\"disableMask\":" + String(manualDisableMask) + "}";
+  json += "]}";
   sendJSON(200, json);
 }
 
@@ -486,6 +486,26 @@ void handleSetChan() {
     manualDisableMask |= (1u << q);
   }
   sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"enabled\":" + (enabled ? "true" : "false") + "}");
+}
+
+// /setdead?q=N&dead=0/1  — set or clear usedOutputs bit for channel N
+void handleSetDead() {
+  if (!server.hasArg("q")) {
+    sendJSON(400, "{\"ok\":false,\"err\":\"missing q\"}");
+    return;
+  }
+  int q = server.arg("q").toInt();
+  if (q < 0 || q > 15) {
+    sendJSON(400, "{\"ok\":false,\"err\":\"q out of range\"}");
+    return;
+  }
+  bool dead = server.hasArg("dead") && server.arg("dead") == "1";
+  if (dead) {
+    usedOutputs |= (uint16_t)(1u << q);
+  } else {
+    usedOutputs &= ~(uint16_t)(1u << q);
+  }
+  sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"dead\":" + String(dead ? "true" : "false") + "}");
 }
 
 // /getchan — return current manualDisableMask
@@ -858,6 +878,7 @@ void setup() {
   server.on("/log",       handleLog);
   server.on("/setchan",   handleSetChan);
   server.on("/getchan",   handleGetChan);
+  server.on("/setdead",   handleSetDead);
   server.onNotFound(     handleNotFound);
   server.begin();
   DPRINTLN("HTTP server started");
