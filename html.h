@@ -277,13 +277,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       font-weight: 700;
     }
 
-    .output-btn .q-amp {
-      font-size: 0.55rem;
-      font-family: var(--font-ui);
-      font-weight: 500;
-      opacity: 0.6;
-    }
-
     .output-btn .q-toggle {
       position: absolute;
       bottom: 4px;
@@ -756,8 +749,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     btn.id = 'btn' + i;
     btn.setAttribute('aria-label', 'Channel ' + (i+1));
     btn.innerHTML =
-      '<span class="q-label">Ch' + (i+1) + '</span>' +
-      '<span class="q-amp" id="amp' + i + '"></span>' +
+      '<span class="q-label" id="label' + i + '">Ch' + (i+1) + '</span>' +
       '<span class="q-sub" id="sub' + i + '">&#8212;</span>' +
       '<button class="q-toggle" id="tog' + i + '" onclick="event.stopPropagation(); toggleChan(' + i + ')" title="Toggle channel enable/disable">\u2713</button>';
     btn.onclick = () => handleBtnClick(i);
@@ -788,7 +780,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   // ── Button click ──────────────────────────
   function handleBtnClick(i) {
     const btn = document.getElementById('btn' + i);
-    if (btn && (btn.classList.contains('dead') || btn.classList.contains('disabled'))) return;
+    if (btn && btn.classList.contains('dead')) return;
+    if (btn && btn.classList.contains('disabled')) {
+      toggleChan(i); // re-enable on click
+      return;
+    }
     if (mode === 'toggle') {
       sendSet(activeQ === i ? -1 : i);
     } else {
@@ -868,7 +864,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       const btn = document.getElementById('btn' + i);
       const tog = document.getElementById('tog' + i);
       const disabled = (disableMask & (1 << i)) !== 0;
-      if (btn) btn.classList.toggle('disabled', disabled);
+      if (btn) {
+        btn.classList.toggle('disabled', disabled);
+        btn.title = disabled ? 'manually disabled' : 'Channel ' + (i+1);
+      }
       if (tog) tog.textContent = disabled ? '\u2717' : '\u2713';
     }
   }
@@ -981,12 +980,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
           }
         }
 
-        // Update ampPeaks (session max amps)
+        // Update ampPeaks (session max amps) in button labels
         if (data.ampPeaks) {
           for (let i = 0; i < 16; i++) {
-            const ampEl = document.getElementById('amp' + i);
-            if (ampEl && data.ampPeaks[i] > 0) {
-              ampEl.textContent = data.ampPeaks[i].toFixed(2) + 'A';
+            const labelEl = document.getElementById('label' + i);
+            if (labelEl) {
+              const amp = data.ampPeaks[i];
+              labelEl.textContent = 'Ch' + (i+1) + (amp > 0 ? ' (' + amp.toFixed(2) + 'A)' : '');
             }
           }
         }
