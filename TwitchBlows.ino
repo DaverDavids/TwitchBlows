@@ -25,7 +25,7 @@
 #include "html.h"
 
 // ── Configuration ─────────────────────────────
-#define HOSTNAME      "twitchblowsv3"
+#define HOSTNAME      "twitchblows"
 #define WIFI_TIMEOUT  5000      // ms to wait for STA connection
 #define AP_SSID       HOSTNAME   // Captive portal AP name
 
