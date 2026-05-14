@@ -48,7 +48,7 @@
 // Current sensor calibration — ACS-style, midpoint ~2.5V on 3.3V/12-bit ADC
 #define CS_MIDPOINT_V     2.5f   // V at zero current (tune to your sensor's actual idle reading)
 #define CS_MV_PER_AMP    -100.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
-#define CS_DETECT_AMPS  5.0f    // minimum current (A) to count as live output
+#define CS_DETECT_AMPS  3.0f    // minimum current (A) to count as live output
 
 // ── ADC Moving Average ────────────────────────
 #define ADC_MA_SAMPLES 10   // number of samples for moving average (default 5)
@@ -393,7 +393,7 @@ bool connectWifi(const String &ssid, const String &psk) {
 void startAP() {
   apMode = true;
   WiFi.mode(WIFI_AP);
-  WiFi.setTxPower(WIFI_POWER_15dBm);
+  WiFi.setTxPower(WIFI_POWER_11dBm);
   WiFi.softAP(AP_SSID);
   dns.start(53, "*", WiFi.softAPIP());
   DPRINT("AP started: "); DPRINTLN(AP_SSID);
