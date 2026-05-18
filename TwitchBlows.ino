@@ -604,44 +604,62 @@ void parseTwitchMessage(const String& msg) {
   }
 
   // Trigger logic
-  if (evBitsEnabled && bitsStr.length() > 0) {
+  if (bitsStr.length() > 0) {
     int bitsCount = bitsStr.toInt();
-    if (bitsCount > 0 && bitsCount >= bitsThreshold) {
-      webLog("[TRIGGER] BITS (" + String(bitsCount) + ") >= " + String(bitsThreshold) + " — firing output");
-      queueFire();
+    if (bitsCount > 0) {
+      if (evBitsEnabled && bitsCount >= bitsThreshold) {
+        webLog("[BITS] " + String(bitsCount) + " bits — threshold " + String(bitsThreshold) + " met → FIRE");
+        queueFire();
+      } else if (!evBitsEnabled) {
+        webLog("[BITS] " + String(bitsCount) + " bits — event disabled, skip");
+      } else {
+        webLog("[BITS] " + String(bitsCount) + " bits — need " + String(bitsThreshold) + ", skip");
+      }
     }
   }
 
-  if (evPointsEnabled && rewardId.length() > 0) {
+  if (rewardId.length() > 0) {
     if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
       pointsRedemptionCount++;
-      webLog("[IRC] Points redemption " + String(pointsRedemptionCount) + "/" + String(pointsThreshold) + " by " + user);
-      if (pointsRedemptionCount >= pointsThreshold) {
+      webLog("[POINTS] Redemption by " + user + " (" + String(pointsRedemptionCount) + "/" + String(pointsThreshold) + ")" + (pointsRewardFilter.length() ? " id=" + rewardId : ""));
+      if (!evPointsEnabled) {
+        webLog("[POINTS] event disabled, skip");
+      } else if (pointsRedemptionCount >= pointsThreshold) {
         pointsRedemptionCount = 0;
-        webLog("[TRIGGER] CHANNEL POINTS threshold met — firing output");
+        webLog("[POINTS] threshold met → FIRE");
         queueFire();
+      } else {
+        webLog("[POINTS] need " + String(pointsThreshold) + ", skip");
       }
     } else {
-      webLog("[IRC] Channel points reward " + rewardId + " does not match filter — ignored");
+      webLog("[POINTS] reward " + rewardId + " does not match filter — ignored");
     }
   }
 
-  if (evSubsEnabled && (msgId == "sub" || msgId == "resub" || msgId == "subgift")) {
+  if (msgId == "sub" || msgId == "resub" || msgId == "subgift") {
     subCount++;
-    webLog("[IRC] Sub event " + String(subCount) + "/" + String(subsThreshold) + " from " + user);
-    if (subCount >= subsThreshold) {
+    webLog("[SUB] sub event by " + user + " (" + String(subCount) + "/" + String(subsThreshold) + ")");
+    if (!evSubsEnabled) {
+      webLog("[SUB] event disabled, skip");
+    } else if (subCount >= subsThreshold) {
       subCount = 0;
-      webLog("[TRIGGER] SUB threshold met — firing output");
+      webLog("[SUB] threshold met → FIRE");
       queueFire();
+    } else {
+      webLog("[SUB] need " + String(subsThreshold) + ", skip");
     }
   }
 
-  if (evRaidsEnabled && msgId == "raid") {
-    int viewers = extractTag(msg, "msg-param-viewerCount").toInt();
-    webLog("[IRC] RAID from " + user + " viewers=" + String(viewers) + " thresh=" + String(raidThreshold));
-    if (viewers >= raidThreshold) {
-      webLog("[TRIGGER] RAID threshold met — firing output");
+  if (msgId == "raid") {
+    int raidViewers = extractTag(msg, "msg-param-viewerCount").toInt();
+    webLog("[RAID] " + String(raidViewers) + " raiders from " + user);
+    if (!evRaidsEnabled) {
+      webLog("[RAID] event disabled, skip");
+    } else if (raidViewers >= raidThreshold) {
+      webLog("[RAID] threshold " + String(raidThreshold) + " met → FIRE");
       queueFire();
+    } else {
+      webLog("[RAID] need " + String(raidThreshold) + " viewers, skip");
     }
   }
 }
