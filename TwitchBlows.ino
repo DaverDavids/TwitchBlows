@@ -577,7 +577,6 @@ void parseTwitchMessage(const String& msg) {
   String user    = extractTag(msg, "display-name");
   String bitsStr = extractTag(msg, "bits");
   String rewardId = extractTag(msg, "custom-reward-id");
-  String pointsCostStr = extractTag(msg, "msg-param-custom-reward-cost");
 
   // Bot detection
   static const char* knownBots[] = {"Nightbot","StreamElements","Moobot","Fossabot","Streamlabs","CommanderRoot",nullptr};
@@ -587,80 +586,62 @@ void parseTwitchMessage(const String& msg) {
   }
   if (isBot) { webLog("[IRC] (bot) " + user + " ignored"); return; }
 
-  if (bitsStr.length() > 0 && bitsStr != "0") {
-    webLog("[IRC] BITS event — user=" + user + " bits=" + bitsStr);
-  }
-  if (rewardId.length() > 0) {
-    webLog("[IRC] CHANNEL POINTS — user=" + user + " reward-id=" + rewardId);
-  }
-  if (msgId == "sub" || msgId == "resub" || msgId == "subgift") {
-    webLog("[IRC] SUB event — user=" + user + " msg-id=" + msgId);
-  }
-  if (msgId == "raid") {
-    webLog("[IRC] RAID event — user=" + user);
-  }
-  if (bitsStr.length() == 0 && rewardId.length() == 0 && msgId.length() == 0) {
-    webLog("[IRC] CHAT msg — user=" + user + " msg=" + extractIRCMessage(msg));
-  }
-
   // Trigger logic
   if (bitsStr.length() > 0) {
     int bitsCount = bitsStr.toInt();
     if (bitsCount > 0) {
       if (evBitsEnabled && bitsCount >= bitsThreshold) {
-        webLog("[BITS] " + String(bitsCount) + " bits — threshold " + String(bitsThreshold) + " met → FIRE");
+        webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " ≥ " + String(bitsThreshold) + " → FIRE");
         queueFire();
       } else if (!evBitsEnabled) {
-        webLog("[BITS] " + String(bitsCount) + " bits — event disabled, skip");
+        webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " — event disabled, skip");
       } else {
-        webLog("[BITS] " + String(bitsCount) + " bits — need " + String(bitsThreshold) + ", skip");
+        webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " < " + String(bitsThreshold) + ", skip");
       }
     }
   }
 
   if (rewardId.length() > 0) {
     if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
-      int pointsCost = pointsCostStr.toInt();
-      if (pointsCost <= 0) pointsCost = 1;
-      webLog("[POINTS] " + String(pointsCost) + "pts from " + user + (pointsRewardFilter.length() ? " id=" + rewardId : ""));
       if (!evPointsEnabled) {
-        webLog("[POINTS] event disabled, skip");
-      } else if (pointsCost >= pointsThreshold) {
-        webLog("[POINTS] " + String(pointsCost) + "pts >= " + String(pointsThreshold) + " → FIRE");
-        queueFire();
+        webLog("[POINTS] user=" + user + " id=" + rewardId + (pointsRewardFilter.length() ? " matched" : "") + " — event disabled, skip");
       } else {
-        webLog("[POINTS] " + String(pointsCost) + "pts < " + String(pointsThreshold) + ", skip");
+        webLog("[POINTS] user=" + user + " id=" + rewardId + (pointsRewardFilter.length() ? " matched" : "") + " → FIRE");
+        queueFire();
       }
     } else {
-      webLog("[POINTS] reward " + rewardId + " does not match filter — ignored");
+      webLog("[POINTS] user=" + user + " id=" + rewardId + " — filter mismatch, skip");
     }
   }
 
   if (msgId == "sub" || msgId == "resub" || msgId == "subgift") {
     subCount++;
-    webLog("[SUB] sub event by " + user + " (" + String(subCount) + "/" + String(subsThreshold) + ")");
     if (!evSubsEnabled) {
-      webLog("[SUB] event disabled, skip");
+      webLog("[SUB] user=" + user + " type=" + msgId + " — event disabled, skip");
     } else if (subCount >= subsThreshold) {
       subCount = 0;
-      webLog("[SUB] threshold met → FIRE");
+      webLog("[SUB] user=" + user + " type=" + msgId + " (" + String(subsThreshold) + ") → FIRE");
       queueFire();
     } else {
-      webLog("[SUB] need " + String(subsThreshold) + ", skip");
+      webLog("[SUB] user=" + user + " type=" + msgId + " (" + String(subCount) + "/" + String(subsThreshold) + "), skip");
     }
   }
 
   if (msgId == "raid") {
     int raidViewers = extractTag(msg, "msg-param-viewerCount").toInt();
-    webLog("[RAID] " + String(raidViewers) + " raiders from " + user);
     if (!evRaidsEnabled) {
-      webLog("[RAID] event disabled, skip");
+      webLog("[RAID] user=" + user + " viewers=" + String(raidViewers) + " — event disabled, skip");
     } else if (raidViewers >= raidThreshold) {
-      webLog("[RAID] threshold " + String(raidThreshold) + " met → FIRE");
+      webLog("[RAID] user=" + user + " viewers=" + String(raidViewers) + " ≥ " + String(raidThreshold) + " → FIRE");
       queueFire();
     } else {
-      webLog("[RAID] need " + String(raidThreshold) + " viewers, skip");
+      webLog("[RAID] user=" + user + " viewers=" + String(raidViewers) + " < " + String(raidThreshold) + ", skip");
     }
+  }
+
+  // Log chat messages only if no event matched
+  if (bitsStr.length() == 0 && rewardId.length() == 0 && msgId.length() == 0) {
+    webLog("[CHAT] user=" + user + " msg=" + extractIRCMessage(msg));
   }
 }
 
