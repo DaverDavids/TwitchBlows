@@ -105,7 +105,6 @@ uint32_t pulseDurMs   = 500;     // how long each output fires (ms)
 String  twitchChannel = "daverdavid";  // loaded from prefs
 
 // Event counters
-int pointsRedemptionCount = 0;
 int subCount = 0;
 
 // Current sense config
@@ -578,6 +577,7 @@ void parseTwitchMessage(const String& msg) {
   String user    = extractTag(msg, "display-name");
   String bitsStr = extractTag(msg, "bits");
   String rewardId = extractTag(msg, "custom-reward-id");
+  String pointsCostStr = extractTag(msg, "msg-param-custom-reward-cost");
 
   // Bot detection
   static const char* knownBots[] = {"Nightbot","StreamElements","Moobot","Fossabot","Streamlabs","CommanderRoot",nullptr};
@@ -620,16 +620,16 @@ void parseTwitchMessage(const String& msg) {
 
   if (rewardId.length() > 0) {
     if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
-      pointsRedemptionCount++;
-      webLog("[POINTS] Redemption by " + user + " (" + String(pointsRedemptionCount) + "/" + String(pointsThreshold) + ")" + (pointsRewardFilter.length() ? " id=" + rewardId : ""));
+      int pointsCost = pointsCostStr.toInt();
+      if (pointsCost <= 0) pointsCost = 1;
+      webLog("[POINTS] " + String(pointsCost) + "pts from " + user + (pointsRewardFilter.length() ? " id=" + rewardId : ""));
       if (!evPointsEnabled) {
         webLog("[POINTS] event disabled, skip");
-      } else if (pointsRedemptionCount >= pointsThreshold) {
-        pointsRedemptionCount = 0;
-        webLog("[POINTS] threshold met → FIRE");
+      } else if (pointsCost >= pointsThreshold) {
+        webLog("[POINTS] " + String(pointsCost) + "pts >= " + String(pointsThreshold) + " → FIRE");
         queueFire();
       } else {
-        webLog("[POINTS] need " + String(pointsThreshold) + ", skip");
+        webLog("[POINTS] " + String(pointsCost) + "pts < " + String(pointsThreshold) + ", skip");
       }
     } else {
       webLog("[POINTS] reward " + rewardId + " does not match filter — ignored");
