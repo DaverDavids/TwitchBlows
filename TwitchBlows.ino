@@ -576,27 +576,46 @@ String extractTag(const String& line, const String& tagName) {
 }
 
 void parseTwitchMessage(const String& msg) {
-  String msgId   = extractTag(msg, "msg-id");
-  String user    = extractTag(msg, "display-name");
-  String bitsStr = extractTag(msg, "bits");
+  String msgId          = extractTag(msg, "msg-id");
+  String user           = extractTag(msg, "display-name");
+  String bitsStr        = extractTag(msg, "bits");
   String customRewardId = extractTag(msg, "custom-reward-id");
 
-  // Raw event dump — one line showing all fields
-  String evType = "CHAT";
-  if (bitsStr.length()    > 0) evType = "BITS";
-  if (customRewardId.length() > 0) evType = "POINTS";
-  if (msgId.length()      > 0) evType = msgId;
+  // Pull all potentially useful tags up front
+  String rewardTitle    = extractTag(msg, "msg-param-customReward-name");
+  String viewerCount    = extractTag(msg, "msg-param-viewerCount");
+  String subPlan        = extractTag(msg, "msg-param-sub-plan");
+  String subPlanName    = extractTag(msg, "msg-param-sub-plan-name");
+  String login          = extractTag(msg, "login");
+  String systemMsg      = extractTag(msg, "system-msg");
+  String chatMsg        = extractIRCMessage(msg);
+
+  // Determine event type label
+  String evType;
+  if      (msgId.length()          > 0) evType = msgId;
+  else if (bitsStr.length()        > 0 && customRewardId.length() > 0) evType = "BITS-POWERUP";
+  else if (bitsStr.length()        > 0) evType = "BITS";
+  else if (customRewardId.length() > 0) evType = "POINTS";
+  else                                   evType = "CHAT";
+
+  // Build summary — only include fields that have values
   String summary = "[EVT:" + evType + "]";
-  if (user.length()          > 0) summary += " user="        + user;
-  if (bitsStr.length()       > 0) summary += " bits="        + bitsStr;
-  if (customRewardId.length() > 0) summary += " reward-id="  + customRewardId;
-  if (msgId.length()         > 0) summary += " msg-id="      + msgId;
-  String viewerCount = extractTag(msg, "msg-param-viewerCount");
-  String subPlan     = extractTag(msg, "msg-param-sub-plan");
-  String login       = extractTag(msg, "login");
-  if (viewerCount.length() > 0) summary += " viewers=" + viewerCount;
-  if (subPlan.length()     > 0) summary += " plan="    + subPlan;
-  if (login.length()       > 0 && login != user) summary += " login=" + login;
+  if (user.length()           > 0) summary += " user="      + user;
+  if (bitsStr.length()        > 0) summary += " bits="      + bitsStr;
+  if (rewardTitle.length()    > 0) summary += " name=\""    + rewardTitle + "\"";
+  if (customRewardId.length() > 0) summary += " id="        + customRewardId;
+  if (viewerCount.length()    > 0) summary += " viewers="   + viewerCount;
+  if (subPlan.length()        > 0) summary += " plan="      + subPlan;
+  if (subPlanName.length()    > 0) summary += " plan-name=\"" + subPlanName + "\"";
+  if (login.length()          > 0 && login != user) summary += " login=" + login;
+  if (systemMsg.length()      > 0) {
+    systemMsg.replace("\\s", " ");
+    systemMsg.replace("\\:", ";");
+    summary += " sys=\"" + systemMsg.substring(0, 60) + "\"";
+  }
+  if (evType == "CHAT" && chatMsg.length() > 0)
+    summary += " msg=\"" + chatMsg.substring(0, 50) + "\"";
+
   webLog(summary);
 
   // Bot detection
