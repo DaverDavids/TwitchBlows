@@ -578,6 +578,24 @@ void parseTwitchMessage(const String& msg) {
   String bitsStr = extractTag(msg, "bits");
   String rewardId = extractTag(msg, "custom-reward-id");
 
+  // Raw event dump — one line showing all fields
+  String evType = "CHAT";
+  if (bitsStr.length()  > 0) evType = "BITS";
+  if (rewardId.length() > 0) evType = "POINTS";
+  if (msgId.length()    > 0) evType = msgId;
+  String summary = "[EVT:" + evType + "]";
+  if (user.length()     > 0) summary += " user="     + user;
+  if (bitsStr.length()  > 0) summary += " bits="     + bitsStr;
+  if (rewardId.length() > 0) summary += " reward-id=" + rewardId;
+  if (msgId.length()    > 0) summary += " msg-id="   + msgId;
+  String viewerCount = extractTag(msg, "msg-param-viewerCount");
+  String subPlan     = extractTag(msg, "msg-param-sub-plan");
+  String login       = extractTag(msg, "login");
+  if (viewerCount.length() > 0) summary += " viewers=" + viewerCount;
+  if (subPlan.length()     > 0) summary += " plan="    + subPlan;
+  if (login.length()       > 0 && login != user) summary += " login=" + login;
+  webLog(summary);
+
   // Bot detection
   static const char* knownBots[] = {"Nightbot","StreamElements","Moobot","Fossabot","Streamlabs","CommanderRoot",nullptr};
   bool isBot = false;
@@ -673,18 +691,6 @@ void handleTwitchIRC() {
     String line = twitchClient.readStringUntil('\n');
     line.trim();
     if (line.length() == 0) continue;
-
-    if (!line.startsWith("PING") && !line.startsWith(":tmi.twitch.tv 00")) {
-      // Drop raw tag-dump lines (start with @badge)
-      if (!line.startsWith("@badge")) {
-        // For PRIVMSG/USERNOTICE, only log the parsed summary (done in parseTwitchMessage)
-        // For other server messages, log a truncated version
-        if (line.indexOf("PRIVMSG") < 0 && line.indexOf("USERNOTICE") < 0) {
-          String shortened = line.substring(0, min((int)line.length(), 80));
-          webLog("[IRC] " + shortened);
-        }
-      }
-    }
 
     if (line.startsWith("PING")) {
       twitchClient.println("PONG :tmi.twitch.tv");
