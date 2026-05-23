@@ -137,6 +137,9 @@ uint32_t lastFireTime = 0;      // timestamp of last fire
 // Channel points reward ID filter (empty = trigger on ALL redemptions)
 String pointsRewardFilter = "";
 
+// Bits reward ID filter (empty = use bitsThreshold; filled = match reward ID only)
+String bitsRewardFilter = "";
+
 // ── Web console log buffer ─────────────────────
 #define LOG_LINES 120
 #define LOG_WIDTH 160
@@ -576,18 +579,18 @@ void parseTwitchMessage(const String& msg) {
   String msgId   = extractTag(msg, "msg-id");
   String user    = extractTag(msg, "display-name");
   String bitsStr = extractTag(msg, "bits");
-  String rewardId = extractTag(msg, "custom-reward-id");
+  String customRewardId = extractTag(msg, "custom-reward-id");
 
   // Raw event dump — one line showing all fields
   String evType = "CHAT";
-  if (bitsStr.length()  > 0) evType = "BITS";
-  if (rewardId.length() > 0) evType = "POINTS";
-  if (msgId.length()    > 0) evType = msgId;
+  if (bitsStr.length()    > 0) evType = "BITS";
+  if (customRewardId.length() > 0) evType = "POINTS";
+  if (msgId.length()      > 0) evType = msgId;
   String summary = "[EVT:" + evType + "]";
-  if (user.length()     > 0) summary += " user="     + user;
-  if (bitsStr.length()  > 0) summary += " bits="     + bitsStr;
-  if (rewardId.length() > 0) summary += " reward-id=" + rewardId;
-  if (msgId.length()    > 0) summary += " msg-id="   + msgId;
+  if (user.length()          > 0) summary += " user="        + user;
+  if (bitsStr.length()       > 0) summary += " bits="        + bitsStr;
+  if (customRewardId.length() > 0) summary += " reward-id="  + customRewardId;
+  if (msgId.length()         > 0) summary += " msg-id="      + msgId;
   String viewerCount = extractTag(msg, "msg-param-viewerCount");
   String subPlan     = extractTag(msg, "msg-param-sub-plan");
   String login       = extractTag(msg, "login");
@@ -608,27 +611,35 @@ void parseTwitchMessage(const String& msg) {
   if (bitsStr.length() > 0) {
     int bitsCount = bitsStr.toInt();
     if (bitsCount > 0) {
-      if (evBitsEnabled && bitsCount >= bitsThreshold) {
+      String powerupId = extractTag(msg, "custom-reward-id");
+      if (!evBitsEnabled) {
+        webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " — event disabled, skip");
+      } else if (bitsRewardFilter.length() > 0) {
+        if (powerupId == bitsRewardFilter) {
+          webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " reward-id=" + powerupId + " matched bits filter → FIRE");
+          queueFire();
+        } else {
+          webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " reward-id=" + powerupId + " != bits filter, skip");
+        }
+      } else if (bitsCount >= bitsThreshold) {
         webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " ≥ " + String(bitsThreshold) + " → FIRE");
         queueFire();
-      } else if (!evBitsEnabled) {
-        webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " — event disabled, skip");
       } else {
         webLog("[BITS] user=" + user + " bits=" + String(bitsCount) + " < " + String(bitsThreshold) + ", skip");
       }
     }
   }
 
-  if (rewardId.length() > 0) {
-    if (pointsRewardFilter.length() == 0 || rewardId == pointsRewardFilter) {
+  if (customRewardId.length() > 0) {
+    if (pointsRewardFilter.length() == 0 || customRewardId == pointsRewardFilter) {
       if (!evPointsEnabled) {
-        webLog("[POINTS] user=" + user + " id=" + rewardId + (pointsRewardFilter.length() ? " matched" : "") + " — event disabled, skip");
+        webLog("[POINTS] user=" + user + " id=" + customRewardId + (pointsRewardFilter.length() ? " matched" : "") + " — event disabled, skip");
       } else {
-        webLog("[POINTS] user=" + user + " id=" + rewardId + (pointsRewardFilter.length() ? " matched" : "") + " → FIRE");
+        webLog("[POINTS] user=" + user + " id=" + customRewardId + (pointsRewardFilter.length() ? " matched" : "") + " → FIRE");
         queueFire();
       }
     } else {
-      webLog("[POINTS] user=" + user + " id=" + rewardId + " — filter mismatch, skip");
+      webLog("[POINTS] user=" + user + " id=" + customRewardId + " — filter mismatch, skip");
     }
   }
 
@@ -758,6 +769,11 @@ void handleSaveCfg() {
     pf.trim();
     pointsRewardFilter = pf;
   }
+  if (server.hasArg("bits_filter")) {
+    String bf = server.arg("bits_filter");
+    bf.trim();
+    bitsRewardFilter = bf;
+  }
 
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
@@ -773,6 +789,7 @@ void handleSaveCfg() {
   prefs.putBool("evSubs",    evSubsEnabled);
   prefs.putBool("evRaids",   evRaidsEnabled);
   prefs.putString("ptsFilter", pointsRewardFilter);
+  prefs.putString("bitsFilter", bitsRewardFilter);
   if (server.hasArg("oauth")) {
     String oa = server.arg("oauth");
     if (oa.length() > 0) prefs.putString("twitch_oauth", oa);
@@ -786,7 +803,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + ",\"fireQueueSize\":" + String(FIRE_QUEUE_SIZE) + ",\"adcMaSamples\":" + String(ADC_MA_SAMPLES) + ",\"logLines\":" + String(LOG_LINES) + ",\"logWidth\":" + String(LOG_WIDTH) + ",\"csMidV\":" + String(CS_MIDPOINT_V) + ",\"csMvPerAmp\":" + String(CS_MV_PER_AMP) + ",\"csDetectAmps\":" + String(CS_DETECT_AMPS) + ",\"pinData\":" + String(PIN_DATA) + ",\"pinClock\":" + String(PIN_CLOCK) + ",\"pinLatch\":" + String(PIN_LATCH) + ",\"pinOE\":" + String(PIN_OE) + ",\"pinCurrent\":" + String(PIN_CURRENT) + ",\"hostname\":\"" + String(HOSTNAME) + "\",\"wifiTo\":" + String(WIFI_TIMEOUT) + ",\"debug\":" + String(DEBUG) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"bitsFilter\":\"" + bitsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + ",\"fireQueueSize\":" + String(FIRE_QUEUE_SIZE) + ",\"adcMaSamples\":" + String(ADC_MA_SAMPLES) + ",\"logLines\":" + String(LOG_LINES) + ",\"logWidth\":" + String(LOG_WIDTH) + ",\"csMidV\":" + String(CS_MIDPOINT_V) + ",\"csMvPerAmp\":" + String(CS_MV_PER_AMP) + ",\"csDetectAmps\":" + String(CS_DETECT_AMPS) + ",\"pinData\":" + String(PIN_DATA) + ",\"pinClock\":" + String(PIN_CLOCK) + ",\"pinLatch\":" + String(PIN_LATCH) + ",\"pinOE\":" + String(PIN_OE) + ",\"pinCurrent\":" + String(PIN_CURRENT) + ",\"hostname\":\"" + String(HOSTNAME) + "\",\"wifiTo\":" + String(WIFI_TIMEOUT) + ",\"debug\":" + String(DEBUG) + "}";
   sendJSON(200, json);
 }
 
@@ -872,6 +889,7 @@ void setup() {
     evSubsEnabled   = prefs.getBool("evSubs",   false);
     evRaidsEnabled  = prefs.getBool("evRaids",  false);
     pointsRewardFilter = prefs.getString("ptsFilter", "");
+    bitsRewardFilter = prefs.getString("bitsFilter", "");
     prefs.end();
   }
 

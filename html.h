@@ -352,7 +352,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
     <div class="cfg-grid">
       <div class="cfg-field">
-        <label for="cfg-bits">Bits Threshold</label>
+        <label for="cfg-bits">Bits Threshold (used when Reward ID is blank)</label>
         <input type="number" id="cfg-bits" value="100" min="1" max="1000000" step="1">
       </div>
       <div class="cfg-field">
@@ -366,6 +366,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <div class="cfg-field">
         <label for="cfg-raid-thresh">Raid Viewers</label>
         <input type="number" id="cfg-raid-thresh" value="10" min="1" max="100000" step="1">
+      </div>
+    </div>
+    <div class="cfg-grid cols1">
+      <div class="cfg-field">
+        <label for="cfg-bits-filter">Bits / Power-Up Reward ID</label>
+        <input type="text" id="cfg-bits-filter" placeholder="blank = use bits threshold">
+        <span class="hint">If set, only this reward ID triggers; bits amount is ignored.</span>
       </div>
     </div>
     <div class="cfg-grid cols1">
@@ -683,6 +690,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('cfg-min-gap'      ).value   = d.minGapMs        !== undefined ? d.minGapMs : 2000;
         document.getElementById('cfg-cs-delay'     ).value   = d.csDelayMs       || 10;
         document.getElementById('cfg-pts-filter'   ).value   = d.ptsFilter       || '';
+        document.getElementById('cfg-bits-filter'  ).value   = d.bitsFilter      || '';
         document.getElementById('cb-bits'   ).checked = d.evBits   === true || d.evBits   === 'true';
         document.getElementById('cb-points' ).checked = d.evPoints === true || d.evPoints === 'true';
         document.getElementById('cb-subs'   ).checked = d.evSubs   === true || d.evSubs   === 'true';
@@ -718,6 +726,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const minGap     = document.getElementById('cfg-min-gap'      ).value;
     const csDelay    = document.getElementById('cfg-cs-delay'     ).value;
     const ptsFilter  = document.getElementById('cfg-pts-filter'   ).value.trim();
+    const bitsFilter = document.getElementById('cfg-bits-filter'  ).value.trim();
     const oauth      = document.getElementById('cfg-oauth'        ).value.trim();
     const nick       = document.getElementById('cfg-nick'         ).value.trim();
 
@@ -730,6 +739,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     if (minGap !== '') params.append('min_gap_ms',   minGap);
     if (csDelay)   params.append('cs_delay_ms',      csDelay);
     params.append('pts_filter', ptsFilter);
+    params.append('bits_filter', bitsFilter);
     params.append('ev_bits',   document.getElementById('cb-bits'  ).checked ? '1' : '0');
     params.append('ev_points', document.getElementById('cb-points').checked ? '1' : '0');
     params.append('ev_subs',   document.getElementById('cb-subs'  ).checked ? '1' : '0');
