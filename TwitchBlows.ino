@@ -669,7 +669,7 @@ void parseTwitchMessage(const String& msg) {
   }
 
   // Log chat messages only if no event matched
-  if (bitsStr.length() == 0 && rewardId.length() == 0 && msgId.length() == 0) {
+  if (bitsStr.length() == 0 && customRewardId.length() == 0 && msgId.length() == 0) {
     webLog("[CHAT] user=" + user + " msg=" + extractIRCMessage(msg));
   }
 }
