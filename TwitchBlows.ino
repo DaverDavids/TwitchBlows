@@ -653,8 +653,16 @@ void parseTwitchMessage(const String& msg) {
     }
   }
 
-  if (customRewardId.length() > 0) {
-    if (pointsRewardFilter.length() == 0 || customRewardId == pointsRewardFilter) {
+	if (customRewardId.length() > 0) {
+	  // If this reward ID matches the bits filter, treat it as a bits event
+	  if (bitsRewardFilter.length() > 0 && customRewardId == bitsRewardFilter) {
+		if (!evBitsEnabled) {
+		  webLog("[BITS] user=" + user + " reward-id=" + customRewardId + " matched bits filter — event disabled, skip");
+		} else {
+		  webLog("[BITS] user=" + user + " reward-id=" + customRewardId + " matched bits filter → FIRE");
+		  queueFire();
+		}
+	  } else if (pointsRewardFilter.length() == 0 || customRewardId == pointsRewardFilter) {
       if (!evPointsEnabled) {
         webLog("[POINTS] user=" + user + " id=" + customRewardId + (pointsRewardFilter.length() ? " matched" : "") + " — event disabled, skip");
       } else {
