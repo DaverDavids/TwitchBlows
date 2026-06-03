@@ -441,22 +441,23 @@ void handlePulse() {
 }
 
 void handleState() {
-  String json = "{\"active\":"    + String(activeQ) +
+  String json = "{\"activeQ\":"   + String(activeQ) +
                 ",\"pulse\":"     + (pulseActive ? "true" : "false") +
                 ",\"pulseQ\":"   + String(pulseActive ? pulseQ : -1) +
-                ",\"used\":"     + String(usedOutputs) +
-                ",\"twitch\":"   + (twitchConnected ? "true" : "false") +
+                ",\"usedMask\":" + String(usedOutputs) +
+                ",\"manualMask\":" + String(manualDisableMask) +
+                ",\"twitchConn\":"   + (twitchConnected ? "true" : "false") +
                 ",\"bitsThresh\":" + String(bitsThreshold) +
                 ",\"pulseDurMs\":" + String(pulseDurMs) +
                 ",\"nextQ\":"   + String(nextOutput) +
-                ",\"sensorOK\":" + String(sensorReady ? "true" : "false") +
+                ",\"sensorReady\":" + String(sensorReady ? "true" : "false") +
                 ",\"adcCurr\":" + String(sensorReady ? adcReadMvAvg() : 0) +
                 ",\"adcMax\":" + String(adcMax) +
                 ",\"adcMin\":" + String(adcMin) +
                 ",\"ampCurr\":" + String(sensorReady ? String(fabsf(adcToAmps(adcReadMvAvg())), 3) : "0") +
                 ",\"ampMax\":" + String(ampMax, 3) +
                 ",\"ampMin\":" + String(ampMin, 3) +
-                 ",\"peaks\":[";
+                 ",\"chanPeaks\":[";
   for (int i = 0; i < 16; i++) {
     json += String(channelPeak[i]);
     if (i < 15) json += ",";
@@ -595,11 +596,14 @@ void parseTwitchMessage(const String& msg) {
   if      (msgId.length()          > 0) evType = msgId;
   else if (bitsStr.length()        > 0 && customRewardId.length() > 0) evType = "BITS-POWERUP";
   else if (bitsStr.length()        > 0) evType = "BITS";
-  else if (customRewardId.length() > 0) evType = "POINTS";
+  else if (customRewardId.length() > 0) evType = "POINTS-CUSTOM";
+  else if (msgId == "highlighted-message" || msgId == "skip-subs-mode-message" ||
+           msgId == "gigantified-emote-message" || msgId == "animated-message") evType = "POINTS-NATIVE";
   else                                   evType = "CHAT";
 
   // Build summary — only include fields that have values
   String summary = "[EVT:" + evType + "]";
+  if (msgId.length()          > 0) summary += " msg-id="    + msgId;
   if (user.length()           > 0) summary += " user="      + user;
   if (bitsStr.length()        > 0) summary += " bits="      + bitsStr;
   if (rewardTitle.length()    > 0) summary += " name=\""    + rewardTitle + "\"";
@@ -659,6 +663,20 @@ void parseTwitchMessage(const String& msg) {
       }
     } else {
       webLog("[POINTS] user=" + user + " id=" + customRewardId + " — filter mismatch, skip");
+    }
+  }
+
+  if (msgId == "highlighted-message" || msgId == "skip-subs-mode-message" ||
+      msgId == "gigantified-emote-message" || msgId == "animated-message") {
+    if (pointsRewardFilter.length() == 0) {
+      if (!evPointsEnabled) {
+        webLog("[POINTS-NATIVE] user=" + user + " msg-id=" + msgId + " — event disabled, skip");
+      } else {
+        webLog("[POINTS-NATIVE] user=" + user + " msg-id=" + msgId + " → FIRE");
+        queueFire();
+      }
+    } else {
+      webLog("[POINTS-NATIVE] user=" + user + " msg-id=" + msgId + " — filter set, skip (native has no reward ID)");
     }
   }
 
@@ -755,6 +773,16 @@ void handleUsed() {
   char buf[16];
   snprintf(buf, sizeof(buf), "0x%04X", usedOutputs);
   sendJSON(200, "{\"used\":\"" + String(buf) + "\"}");
+}
+
+void handleToggleChan() {
+  if (!server.hasArg("q")) { sendJSON(400, "{\"ok\":false}"); return; }
+  int q = server.arg("q").toInt();
+  if (q < 0 || q > 15) { sendJSON(400, "{\"ok\":false}"); return; }
+  bool markUsed = server.hasArg("used") && server.arg("used") == "1";
+  if (markUsed) usedOutputs |= (uint16_t)(1u << q);
+  else          usedOutputs &= ~(uint16_t)(1u << q);
+  sendJSON(200, "{\"ok\":true,\"q\":" + String(q) + ",\"used\":" + String(markUsed?"true":"false") + "}");
 }
 
 void handleSaveCfg() {
@@ -915,8 +943,10 @@ void setup() {
   server.on("/",         handleRoot);
   server.on("/set",      handleSet);
   server.on("/pulse",    handlePulse);
-  server.on("/state",    handleState);
-  server.on("/savewifi", handleSaveWifi);
+  server.on("/state",      handleState);
+  server.on("/status",     handleState);   // alias for HTML compatibility
+  server.on("/togglechan", handleToggleChan);
+  server.on("/savewifi",   handleSaveWifi);
   server.on("/resetused",  handleResetUsed);
   server.on("/used",       handleUsed);
   server.on("/savecfg",    handleSaveCfg);

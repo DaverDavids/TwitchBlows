@@ -503,6 +503,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   let pulseTimers = {};
   let pulseBars   = {};
   let usedMask    = 0;
+  let manualMask  = 0;
   let twitchConn  = false;
   let nextQ       = 0;
 
@@ -625,7 +626,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   function updateGrid() {
     for (let i = 0; i < 16; i++) {
       const btn = document.getElementById('btn' + i);
-      const dead = (usedMask >> i) & 1;
+      const dead = ((usedMask >> i) & 1) || ((manualMask >> i) & 1);
       btn.classList.toggle('dead', dead);
       btn.classList.toggle('next', !dead && i === nextQ);
     }
@@ -637,6 +638,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       .then(r => r.json())
       .then(data => {
         usedMask   = data.usedMask   || 0;
+        manualMask = data.manualMask || 0;
         activeQ    = data.activeQ    !== undefined ? data.activeQ : -1;
         twitchConn = data.twitchConn || false;
         nextQ      = data.nextQ      !== undefined ? data.nextQ : 0;
