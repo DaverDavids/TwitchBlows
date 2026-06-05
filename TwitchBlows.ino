@@ -260,6 +260,7 @@ float adcToAmps(int millivolts) {
 
 // ── BurstCast trigger ─────────────────────────
 bool fireTrigger() {
+  webLog("[TRIGGER] Sending UDP to " + burstIp.toString() + ":" + String(burstPort));
   udp.beginPacket(burstIp, burstPort);
   udp.write((const uint8_t*)"TRIGGER", 7);
   udp.endPacket();
@@ -270,10 +271,12 @@ bool fireTrigger() {
     if (n > 0) {
       char buf[8] = {};
       udp.read(buf, sizeof(buf) - 1);
+      webLog("[TRIGGER] Reply: \"" + String(buf) + "\"");
       if (strncmp(buf, "OK", 2) == 0) return true;
     }
     delay(1);
   }
+  webLog("[TRIGGER] ACK timeout");
   return false;
 }
 
