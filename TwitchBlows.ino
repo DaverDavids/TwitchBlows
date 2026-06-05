@@ -322,6 +322,14 @@ void safePulse(int8_t q, uint32_t ms) {
 int fireNextOutput(uint32_t pulseDurationMs) {
   if (!sensorReady) { webLog("[FIRE] Blocked — sensor not ready"); return -1; }
 
+  // Fire BurstCast trigger immediately, before any current sensing delay
+  bool acked = fireTrigger();
+  if (acked) {
+    webLog("[TRIGGER] BurstCast ACK received");
+  } else {
+    webLog("[TRIGGER] BurstCast ACK TIMEOUT");
+  }
+
   disableOutputs();
 
   for (int tries = 0; tries < 16; tries++) {
@@ -366,13 +374,6 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     pulseEnd    = millis() + pulseDurationMs;
     pendingUsedQ = q;
     webLog("[Ch" + String(q+1) + "] peak=" + String(peakAmps,3) + "A — FIRING " + String(pulseDurationMs) + "ms");
-
-    bool acked = fireTrigger();
-    if (acked) {
-      webLog("[TRIGGER] Ch" + String(q+1) + " → BurstCast ACK received");
-    } else {
-      webLog("[TRIGGER] Ch" + String(q+1) + " → BurstCast ACK TIMEOUT");
-    }
 
     return q;
   }
