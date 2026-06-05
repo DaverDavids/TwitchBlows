@@ -14,6 +14,7 @@
 // ── Includes ──────────────────────────────────
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <WiFiClientSecure.h>
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
@@ -50,6 +51,11 @@
 #define CS_MV_PER_AMP    -100.0f   // mV/A sensitivity (e.g. ACS712-5A=185, 20A=100, 30A=66)
 #define CS_DETECT_AMPS  3.0f    // minimum current (A) to count as live output
 
+// ── BurstCast Trigger (configurable in web UI) ─
+IPAddress burstIp(192, 168, 1, 200);
+int       burstPort = 5005;
+int       localPort = 5006;
+
 // ── ADC Moving Average ────────────────────────
 #define ADC_MA_SAMPLES 10   // number of samples for moving average (default 5)
 
@@ -72,6 +78,7 @@ uint32_t adcReadMvAvg() {
 
 // ── Globals ───────────────────────────────────
 WebServer   server(80);
+WiFiUDP     udp;
 DNSServer   dns;
 Preferences prefs;
 
@@ -251,6 +258,25 @@ float adcToAmps(int millivolts) {
   return (v - CS_MIDPOINT_V) / (CS_MV_PER_AMP / 1000.0f);
 }
 
+// ── BurstCast trigger ─────────────────────────
+bool fireTrigger() {
+  udp.beginPacket(burstIp, burstPort);
+  udp.write((const uint8_t*)"TRIGGER", 7);
+  udp.endPacket();
+
+  uint32_t t = millis();
+  while (millis() - t < 100) {
+    int n = udp.parsePacket();
+    if (n > 0) {
+      char buf[8] = {};
+      udp.read(buf, sizeof(buf) - 1);
+      if (strncmp(buf, "OK", 2) == 0) return true;
+    }
+    delay(1);
+  }
+  return false;
+}
+
 // ── Safe pulse: guaranteed single-output, always-off-after ─
 void safePulse(int8_t q, uint32_t ms) {
   disableOutputs();
@@ -280,6 +306,13 @@ void safePulse(int8_t q, uint32_t ms) {
   activeQ     = q;
   pulseEnd    = millis() + ms;
   webLog("[FIRE] Ch" + String(q+1) + " ON for " + String(ms) + "ms");
+
+  bool acked = fireTrigger();
+  if (acked) {
+    webLog("[TRIGGER] Ch" + String(q+1) + " → BurstCast ACK received");
+  } else {
+    webLog("[TRIGGER] Ch" + String(q+1) + " → BurstCast ACK TIMEOUT");
+  }
 }
 
 // ── Fire next live output with current sensing ─
@@ -330,6 +363,14 @@ int fireNextOutput(uint32_t pulseDurationMs) {
     pulseEnd    = millis() + pulseDurationMs;
     pendingUsedQ = q;
     webLog("[Ch" + String(q+1) + "] peak=" + String(peakAmps,3) + "A — FIRING " + String(pulseDurationMs) + "ms");
+
+    bool acked = fireTrigger();
+    if (acked) {
+      webLog("[TRIGGER] Ch" + String(q+1) + " → BurstCast ACK received");
+    } else {
+      webLog("[TRIGGER] Ch" + String(q+1) + " → BurstCast ACK TIMEOUT");
+    }
+
     return q;
   }
 
@@ -829,6 +870,19 @@ void handleSaveCfg() {
     bf.trim();
     bitsRewardFilter = bf;
   }
+  if (server.hasArg("burst_ip")) {
+    String ipStr = server.arg("burst_ip");
+    ipStr.trim();
+    burstIp.fromString(ipStr);
+  }
+  if (server.hasArg("burst_port")) {
+    int p = server.arg("burst_port").toInt();
+    if (p > 0 && p <= 65535) burstPort = p;
+  }
+  if (server.hasArg("local_port")) {
+    int p = server.arg("local_port").toInt();
+    if (p > 0 && p <= 65535) localPort = p;
+  }
 
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
@@ -845,6 +899,9 @@ void handleSaveCfg() {
   prefs.putBool("evRaids",   evRaidsEnabled);
   prefs.putString("ptsFilter", pointsRewardFilter);
   prefs.putString("bitsFilter", bitsRewardFilter);
+  prefs.putString("burstIp",   burstIp.toString());
+  prefs.putInt("burstPort",   burstPort);
+  prefs.putInt("localPort",   localPort);
   if (server.hasArg("oauth")) {
     String oa = server.arg("oauth");
     if (oa.length() > 0) prefs.putString("twitch_oauth", oa);
@@ -858,7 +915,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"bitsFilter\":\"" + bitsRewardFilter + "\",\"nextQ\":" + String(nextOutput) + ",\"fireQueueSize\":" + String(FIRE_QUEUE_SIZE) + ",\"adcMaSamples\":" + String(ADC_MA_SAMPLES) + ",\"logLines\":" + String(LOG_LINES) + ",\"logWidth\":" + String(LOG_WIDTH) + ",\"csMidV\":" + String(CS_MIDPOINT_V) + ",\"csMvPerAmp\":" + String(CS_MV_PER_AMP) + ",\"csDetectAmps\":" + String(CS_DETECT_AMPS) + ",\"pinData\":" + String(PIN_DATA) + ",\"pinClock\":" + String(PIN_CLOCK) + ",\"pinLatch\":" + String(PIN_LATCH) + ",\"pinOE\":" + String(PIN_OE) + ",\"pinCurrent\":" + String(PIN_CURRENT) + ",\"hostname\":\"" + String(HOSTNAME) + "\",\"wifiTo\":" + String(WIFI_TIMEOUT) + ",\"debug\":" + String(DEBUG) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"bitsFilter\":\"" + bitsRewardFilter + "\",\"burstIp\":\"" + burstIp.toString() + "\",\"burstPort\":" + String(burstPort) + ",\"localPort\":" + String(localPort) + ",\"nextQ\":" + String(nextOutput) + ",\"fireQueueSize\":" + String(FIRE_QUEUE_SIZE) + ",\"adcMaSamples\":" + String(ADC_MA_SAMPLES) + ",\"logLines\":" + String(LOG_LINES) + ",\"logWidth\":" + String(LOG_WIDTH) + ",\"csMidV\":" + String(CS_MIDPOINT_V) + ",\"csMvPerAmp\":" + String(CS_MV_PER_AMP) + ",\"csDetectAmps\":" + String(CS_DETECT_AMPS) + ",\"pinData\":" + String(PIN_DATA) + ",\"pinClock\":" + String(PIN_CLOCK) + ",\"pinLatch\":" + String(PIN_LATCH) + ",\"pinOE\":" + String(PIN_OE) + ",\"pinCurrent\":" + String(PIN_CURRENT) + ",\"hostname\":\"" + String(HOSTNAME) + "\",\"wifiTo\":" + String(WIFI_TIMEOUT) + ",\"debug\":" + String(DEBUG) + "}";
   sendJSON(200, json);
 }
 
@@ -945,8 +1002,14 @@ void setup() {
     evRaidsEnabled  = prefs.getBool("evRaids",  false);
     pointsRewardFilter = prefs.getString("ptsFilter", "");
     bitsRewardFilter = prefs.getString("bitsFilter", "");
+    burstIp.fromString(prefs.getString("burstIp", "192.168.1.200"));
+    burstPort = prefs.getInt("burstPort", 5005);
+    localPort = prefs.getInt("localPort", 5006);
     prefs.end();
   }
+
+  udp.begin(localPort);
+  webLog("[BOOT] UDP on port " + String(localPort) + " for BurstCast ACK");
 
   server.on("/",         handleRoot);
   server.on("/set",      handleSet);

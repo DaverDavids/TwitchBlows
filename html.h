@@ -403,6 +403,26 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <!-- BurstCast Trigger -->
+  <div class="cfg-card">
+    <div class="cfg-card-title">BurstCast Trigger</div>
+    <div class="cfg-grid">
+      <div class="cfg-field">
+        <label for="cfg-burst-ip">BurstCast IP Address</label>
+        <input type="text" id="cfg-burst-ip" placeholder="192.168.1.200">
+      </div>
+      <div class="cfg-field">
+        <label for="cfg-burst-port">BurstCast Port</label>
+        <input type="number" id="cfg-burst-port" value="5005" min="1" max="65535" step="1">
+      </div>
+      <div class="cfg-field">
+        <label for="cfg-local-port">Local UDP Port</label>
+        <input type="number" id="cfg-local-port" value="5006" min="1" max="65535" step="1">
+        <span class="hint">For receiving ACK replies.</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Current Sensor Calibration (read-only — firmware defines) -->
   <div class="cfg-card">
     <div class="cfg-card-title">Current Sensor — firmware #defines (read-only)</div>
@@ -693,6 +713,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('cfg-cs-delay'     ).value   = d.csDelayMs       || 10;
         document.getElementById('cfg-pts-filter'   ).value   = d.ptsFilter       || '';
         document.getElementById('cfg-bits-filter'  ).value   = d.bitsFilter      || '';
+        document.getElementById('cfg-burst-ip'     ).value   = d.burstIp         || '192.168.1.200';
+        document.getElementById('cfg-burst-port'   ).value   = d.burstPort       || 5005;
+        document.getElementById('cfg-local-port'   ).value   = d.localPort       || 5006;
         document.getElementById('cb-bits'   ).checked = d.evBits   === true || d.evBits   === 'true';
         document.getElementById('cb-points' ).checked = d.evPoints === true || d.evPoints === 'true';
         document.getElementById('cb-subs'   ).checked = d.evSubs   === true || d.evSubs   === 'true';
@@ -729,6 +752,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const csDelay    = document.getElementById('cfg-cs-delay'     ).value;
     const ptsFilter  = document.getElementById('cfg-pts-filter'   ).value.trim();
     const bitsFilter = document.getElementById('cfg-bits-filter'  ).value.trim();
+    const burstIp    = document.getElementById('cfg-burst-ip'     ).value.trim();
+    const burstPort  = document.getElementById('cfg-burst-port'   ).value;
+    const localPort  = document.getElementById('cfg-local-port'   ).value;
     const oauth      = document.getElementById('cfg-oauth'        ).value.trim();
     const nick       = document.getElementById('cfg-nick'         ).value.trim();
 
@@ -742,6 +768,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     if (csDelay)   params.append('cs_delay_ms',      csDelay);
     params.append('pts_filter', ptsFilter);
     params.append('bits_filter', bitsFilter);
+    if (burstIp)   params.append('burst_ip',   burstIp);
+    if (burstPort) params.append('burst_port', burstPort);
+    if (localPort) params.append('local_port', localPort);
     params.append('ev_bits',   document.getElementById('cb-bits'  ).checked ? '1' : '0');
     params.append('ev_points', document.getElementById('cb-points').checked ? '1' : '0');
     params.append('ev_subs',   document.getElementById('cb-subs'  ).checked ? '1' : '0');
