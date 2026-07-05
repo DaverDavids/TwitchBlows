@@ -89,6 +89,7 @@ int8_t   activeQ = -1;   // -1 = all off, 0-15 = active output (toggle)
 bool     pulseActive = false;
 int8_t   pulseQ      = -1;
 uint32_t pulseEnd    = 0;
+uint8_t  pwmDuty     = 100;   // 0-100 percent, 100 = always on
 
 // Output tracking
 uint16_t usedOutputs = 0;       // bitmask: bit N=1 means output N is dead/used
@@ -887,6 +888,10 @@ void handleSaveCfg() {
     int p = server.arg("local_port").toInt();
     if (p > 0 && p <= 65535) localPort = p;
   }
+  if (server.hasArg("pwm_duty")) {
+    int d = server.arg("pwm_duty").toInt();
+    if (d >= 0 && d <= 100) pwmDuty = (uint8_t)d;
+  }
 
   prefs.begin("twitch", false);
   prefs.putInt("bitsThreshold", bitsThreshold);
@@ -896,6 +901,7 @@ void handleSaveCfg() {
   prefs.putUInt("pulseDurMs",  pulseDurMs);
   prefs.putUInt("csDelayMs",  currentSenseDelayMs);
   prefs.putUInt("minGapMs",   minGapMs);
+  prefs.putUInt("pwmDuty",    pwmDuty);
   prefs.putString("channel",   twitchChannel);
   prefs.putBool("evBits",    evBitsEnabled);
   prefs.putBool("evPoints",  evPointsEnabled);
@@ -919,7 +925,7 @@ void handleSaveCfg() {
 }
 
 void handleGetCfg() {
-  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"bitsFilter\":\"" + bitsRewardFilter + "\",\"burstIp\":\"" + burstIp.toString() + "\",\"burstPort\":" + String(burstPort) + ",\"localPort\":" + String(localPort) + ",\"nextQ\":" + String(nextOutput) + ",\"fireQueueSize\":" + String(FIRE_QUEUE_SIZE) + ",\"adcMaSamples\":" + String(ADC_MA_SAMPLES) + ",\"logLines\":" + String(LOG_LINES) + ",\"logWidth\":" + String(LOG_WIDTH) + ",\"csMidV\":" + String(CS_MIDPOINT_V) + ",\"csMvPerAmp\":" + String(CS_MV_PER_AMP) + ",\"csDetectAmps\":" + String(CS_DETECT_AMPS) + ",\"pinData\":" + String(PIN_DATA) + ",\"pinClock\":" + String(PIN_CLOCK) + ",\"pinLatch\":" + String(PIN_LATCH) + ",\"pinOE\":" + String(PIN_OE) + ",\"pinCurrent\":" + String(PIN_CURRENT) + ",\"hostname\":\"" + String(HOSTNAME) + "\",\"wifiTo\":" + String(WIFI_TIMEOUT) + ",\"debug\":" + String(DEBUG) + "}";
+  String json = "{\"ok\":true,\"bitsThreshold\":" + String(bitsThreshold) + ",\"pointsThreshold\":" + String(pointsThreshold) + ",\"subsThreshold\":" + String(subsThreshold) + ",\"raidThreshold\":" + String(raidThreshold) + ",\"pulseDurMs\":" + String(pulseDurMs) + ",\"csDelayMs\":" + String(currentSenseDelayMs) + ",\"minGapMs\":" + String(minGapMs) + ",\"pwmDuty\":" + String(pwmDuty) + ",\"twitchConnected\":" + String(twitchConnected ? "true" : "false") + ",\"channel\":\"" + twitchChannel + "\",\"evBits\":" + String(evBitsEnabled ? "true" : "false") + ",\"evPoints\":" + String(evPointsEnabled ? "true" : "false") + ",\"evSubs\":" + String(evSubsEnabled ? "true" : "false") + ",\"evRaids\":" + String(evRaidsEnabled ? "true" : "false") + ",\"ptsFilter\":\"" + pointsRewardFilter + "\",\"bitsFilter\":\"" + bitsRewardFilter + "\",\"burstIp\":\"" + burstIp.toString() + "\",\"burstPort\":" + String(burstPort) + ",\"localPort\":" + String(localPort) + ",\"nextQ\":" + String(nextOutput) + ",\"fireQueueSize\":" + String(FIRE_QUEUE_SIZE) + ",\"adcMaSamples\":" + String(ADC_MA_SAMPLES) + ",\"logLines\":" + String(LOG_LINES) + ",\"logWidth\":" + String(LOG_WIDTH) + ",\"csMidV\":" + String(CS_MIDPOINT_V) + ",\"csMvPerAmp\":" + String(CS_MV_PER_AMP) + ",\"csDetectAmps\":" + String(CS_DETECT_AMPS) + ",\"pinData\":" + String(PIN_DATA) + ",\"pinClock\":" + String(PIN_CLOCK) + ",\"pinLatch\":" + String(PIN_LATCH) + ",\"pinOE\":" + String(PIN_OE) + ",\"pinCurrent\":" + String(PIN_CURRENT) + ",\"hostname\":\"" + String(HOSTNAME) + "\",\"wifiTo\":" + String(WIFI_TIMEOUT) + ",\"debug\":" + String(DEBUG) + "}";
   sendJSON(200, json);
 }
 
@@ -1009,6 +1015,7 @@ void setup() {
     burstIp.fromString(prefs.getString("burstIp", "192.168.1.200"));
     burstPort = prefs.getInt("burstPort", 5005);
     localPort = prefs.getInt("localPort", 5006);
+    pwmDuty  = (uint8_t)prefs.getUInt("pwmDuty", 100);
     prefs.end();
   }
 
@@ -1076,18 +1083,30 @@ void loop() {
       }
     }
 
-    // Pulse auto-off — checked every loop iteration, no blocking delay
-    if (pulseActive && (millis() >= pulseEnd)) {
-      disableOutputs();
-      pulseActive = false;
-      pulseQ      = -1;
-      activeQ     = -1;
-      if (pendingUsedQ >= 0) {
-        usedOutputs |= (uint16_t)(1u << pendingUsedQ);
-        webLog("[USED] Ch" + String(pendingUsedQ+1) + " marked dead after fire");
-        pendingUsedQ = -1;
+    // Pulse auto-off — with PWM duty cycle
+    if (pulseActive) {
+      uint32_t now = millis();
+      if (now >= pulseEnd) {
+        disableOutputs();
+        pulseActive = false;
+        pulseQ      = -1;
+        activeQ     = -1;
+        if (pendingUsedQ >= 0) {
+          usedOutputs |= (uint16_t)(1u << pendingUsedQ);
+          webLog("[USED] Ch" + String(pendingUsedQ+1) + " marked dead after fire");
+          pendingUsedQ = -1;
+        }
+        webLog("[FIRE] Ch pulse ended — output OFF");
+      } else if (pwmDuty < 100 && pwmDuty > 0) {
+        static const uint32_t PWM_PERIOD_MS = 20;
+        uint32_t phase = now % PWM_PERIOD_MS;
+        uint32_t onTime = (PWM_PERIOD_MS * pwmDuty) / 100;
+        if (phase < onTime) {
+          shiftWriteEnabled((uint16_t)(1u << pulseQ));
+        } else {
+          disableOutputs();
+        }
       }
-      webLog("[FIRE] Ch pulse ended — output OFF");
     }
 
     // Fire queue processor — respects rate limit and waits for pulse to finish

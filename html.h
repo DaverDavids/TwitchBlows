@@ -400,6 +400,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <input type="number" id="cfg-cs-delay" value="10" min="1" max="500" step="1">
         <span class="hint">Wait after fire before ADC read.</span>
       </div>
+      <div class="cfg-field">
+        <label for="cfg-pwm-duty">PWM Duty Cycle (%)</label>
+        <input type="number" id="cfg-pwm-duty" value="100" min="0" max="100" step="1">
+        <span class="hint">100 = always on, 50 = on half the time.</span>
+      </div>
     </div>
   </div>
 
@@ -716,6 +721,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         document.getElementById('cfg-burst-ip'     ).value   = d.burstIp         || '192.168.1.200';
         document.getElementById('cfg-burst-port'   ).value   = d.burstPort       || 5005;
         document.getElementById('cfg-local-port'   ).value   = d.localPort       || 5006;
+        document.getElementById('cfg-pwm-duty'     ).value   = d.pwmDuty        ?? 100;
         document.getElementById('cb-bits'   ).checked = d.evBits   === true || d.evBits   === 'true';
         document.getElementById('cb-points' ).checked = d.evPoints === true || d.evPoints === 'true';
         document.getElementById('cb-subs'   ).checked = d.evSubs   === true || d.evSubs   === 'true';
@@ -755,6 +761,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     const burstIp    = document.getElementById('cfg-burst-ip'     ).value.trim();
     const burstPort  = document.getElementById('cfg-burst-port'   ).value;
     const localPort  = document.getElementById('cfg-local-port'   ).value;
+    const pwmDuty    = document.getElementById('cfg-pwm-duty'     ).value;
     const oauth      = document.getElementById('cfg-oauth'        ).value.trim();
     const nick       = document.getElementById('cfg-nick'         ).value.trim();
 
@@ -771,6 +778,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     if (burstIp)   params.append('burst_ip',   burstIp);
     if (burstPort) params.append('burst_port', burstPort);
     if (localPort) params.append('local_port', localPort);
+    if (pwmDuty !== '') params.append('pwm_duty', pwmDuty);
     params.append('ev_bits',   document.getElementById('cb-bits'  ).checked ? '1' : '0');
     params.append('ev_points', document.getElementById('cb-points').checked ? '1' : '0');
     params.append('ev_subs',   document.getElementById('cb-subs'  ).checked ? '1' : '0');
