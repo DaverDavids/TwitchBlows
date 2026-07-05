@@ -968,7 +968,6 @@ void setup() {
   disableOutputs();                // all off at boot
 
   SPI.begin(PIN_CLOCK, -1, PIN_DATA, -1);  // SCK, MISO, MOSI, SS
-  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
 
   analogSetAttenuation(ADC_11db);
   pinMode(PIN_CURRENT, INPUT);
@@ -1106,9 +1105,9 @@ void loop() {
         }
         webLog("[FIRE] Ch pulse ended — output OFF");
       } else if (pwmDuty < 100 && pwmDuty > 0) {
-        static const uint32_t PWM_PERIOD_MS = 1;
-        uint32_t phase = now % PWM_PERIOD_MS;
-        uint32_t onTime = (PWM_PERIOD_MS * pwmDuty) / 100;
+        static const uint32_t PWM_PERIOD_US = 2000;
+        uint32_t phase = micros() % PWM_PERIOD_US;
+        uint32_t onTime = (PWM_PERIOD_US * (uint32_t)pwmDuty) / 100;
         if (phase < onTime) {
           digitalWrite(PIN_OE, LOW);   // enable output — data already in shift reg
         } else {
