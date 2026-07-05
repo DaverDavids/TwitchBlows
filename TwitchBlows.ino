@@ -91,6 +91,9 @@ bool     pulseActive = false;
 int8_t   pulseQ      = -1;
 uint32_t pulseEnd    = 0;
 uint8_t  pwmDuty     = 100;   // 0-100 percent, 100 = always on
+hw_timer_t* pwmTimer = nullptr;
+volatile uint32_t pwmPhaseUs = 0;
+volatile uint32_t pwmPeriodUs = 2000;  // 500Hz default
 
 // Output tracking
 uint16_t usedOutputs = 0;       // bitmask: bit N=1 means output N is dead/used
@@ -284,6 +287,16 @@ bool fireTrigger() {
   }
   webLog("[TRIGGER] ACK timeout");
   return false;
+}
+
+// ── PWM timer ISR (500Hz, 100µs tick) ──────────
+void IRAM_ATTR onPwmTimer() {
+  if (!pulseActive || pwmDuty >= 100) return;
+  if (pwmDuty == 0) { digitalWrite(PIN_OE, HIGH); return; }
+  pwmPhaseUs += 100;
+  if (pwmPhaseUs >= pwmPeriodUs) pwmPhaseUs = 0;
+  uint32_t onTime = (pwmPeriodUs * (uint32_t)pwmDuty) / 100;
+  digitalWrite(PIN_OE, pwmPhaseUs < onTime ? LOW : HIGH);
 }
 
 // ── Safe pulse: guaranteed single-output, always-off-after ─
@@ -969,6 +982,11 @@ void setup() {
 
   SPI.begin(PIN_CLOCK, -1, PIN_DATA, -1);  // SCK, MISO, MOSI, SS
 
+  pwmTimer = timerBegin(10000);            // 10kHz tick = 100µs per tick
+  timerAttachInterrupt(pwmTimer, &onPwmTimer);
+  timerAlarm(pwmTimer, 1, true);           // fire every tick, auto-reload
+  timerStart(pwmTimer);
+
   analogSetAttenuation(ADC_11db);
   pinMode(PIN_CURRENT, INPUT);
 
@@ -1090,30 +1108,18 @@ void loop() {
       }
     }
 
-    // Pulse auto-off — with PWM duty cycle
-    if (pulseActive) {
-      uint32_t now = millis();
-      if (now >= pulseEnd) {
-        disableOutputs();
-        pulseActive = false;
-        pulseQ      = -1;
-        activeQ     = -1;
-        if (pendingUsedQ >= 0) {
-          usedOutputs |= (uint16_t)(1u << pendingUsedQ);
-          webLog("[USED] Ch" + String(pendingUsedQ+1) + " marked dead after fire");
-          pendingUsedQ = -1;
-        }
-        webLog("[FIRE] Ch pulse ended — output OFF");
-      } else if (pwmDuty < 100 && pwmDuty > 0) {
-        static const uint32_t PWM_PERIOD_US = 2000;
-        uint32_t phase = micros() % PWM_PERIOD_US;
-        uint32_t onTime = (PWM_PERIOD_US * (uint32_t)pwmDuty) / 100;
-        if (phase < onTime) {
-          digitalWrite(PIN_OE, LOW);   // enable output — data already in shift reg
-        } else {
-          digitalWrite(PIN_OE, HIGH);  // tri-state — no SPI needed
-        }
+    // Pulse auto-off — PWM toggled by hardware timer ISR
+    if (pulseActive && millis() >= pulseEnd) {
+      disableOutputs();
+      pulseActive = false;
+      pulseQ      = -1;
+      activeQ     = -1;
+      if (pendingUsedQ >= 0) {
+        usedOutputs |= (uint16_t)(1u << pendingUsedQ);
+        webLog("[USED] Ch" + String(pendingUsedQ+1) + " marked dead after fire");
+        pendingUsedQ = -1;
       }
+      webLog("[FIRE] Ch pulse ended — output OFF");
     }
 
     // Fire queue processor — respects rate limit and waits for pulse to finish
