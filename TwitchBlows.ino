@@ -21,6 +21,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <SPI.h>
 #include <Secrets.h>
 #include <time.h>
 #include "html.h"
@@ -223,8 +224,8 @@ void shiftWrite(uint16_t val) {
   uint8_t lo = val & 0xFF;
   debugShiftBytes("shiftWrite      ", hi, lo);
   digitalWrite(PIN_LATCH, LOW);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, hi);  // IC2 data (Ch9-16)
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, lo);  // IC1 data (Ch1-8)
+  SPI.transfer(hi);  // IC2 data (Ch9-16)
+  SPI.transfer(lo);  // IC1 data (Ch1-8)
   digitalWrite(PIN_LATCH, HIGH);
 }
 
@@ -237,10 +238,9 @@ void shiftWriteEnabled(uint16_t val) {
   debugShiftBytes("shiftWriteEnabled", hi, lo);
   digitalWrite(PIN_OE, HIGH);                   // tri-state outputs before touching shift register
   digitalWrite(PIN_LATCH, LOW);
-  delayMicroseconds(5);                         // let latch settle (595 setup time)
   // Write exactly 16 bits — this fully replaces previous register contents
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, hi);  // IC2 data (Ch9-16)
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, lo);  // IC1 data (Ch1-8)
+  SPI.transfer(hi);  // IC2 data (Ch9-16)
+  SPI.transfer(lo);  // IC1 data (Ch1-8)
   digitalWrite(PIN_LATCH, HIGH);                // latch new data while OE is still HIGH (safe)
   if (val != 0) digitalWrite(PIN_OE, LOW);      // now enable — exactly one bit is live
 }
@@ -249,8 +249,8 @@ void disableOutputs() {
   debugShiftBytes("disableOutputs  ", 0x00, 0x00);
   digitalWrite(PIN_OE, HIGH);
   digitalWrite(PIN_LATCH, LOW);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
-  shiftOut(PIN_DATA, PIN_CLOCK, MSBFIRST, 0x00);
+  SPI.transfer(0x00);
+  SPI.transfer(0x00);
   digitalWrite(PIN_LATCH, HIGH);
 }
 
@@ -962,6 +962,9 @@ void setup() {
   digitalWrite(PIN_LATCH, HIGH);  // idle state
   disableOutputs();                // all off at boot
 
+  SPI.begin(PIN_CLOCK, -1, PIN_DATA, -1);  // SCK, MISO, MOSI, SS
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+
   analogSetAttenuation(ADC_11db);
   pinMode(PIN_CURRENT, INPUT);
 
@@ -1098,7 +1101,7 @@ void loop() {
         }
         webLog("[FIRE] Ch pulse ended — output OFF");
       } else if (pwmDuty < 100 && pwmDuty > 0) {
-        static const uint32_t PWM_PERIOD_MS = 20;
+        static const uint32_t PWM_PERIOD_MS = 1;
         uint32_t phase = now % PWM_PERIOD_MS;
         uint32_t onTime = (PWM_PERIOD_MS * pwmDuty) / 100;
         if (phase < onTime) {
