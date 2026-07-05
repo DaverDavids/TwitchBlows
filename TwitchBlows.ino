@@ -224,8 +224,10 @@ void shiftWrite(uint16_t val) {
   uint8_t lo = val & 0xFF;
   debugShiftBytes("shiftWrite      ", hi, lo);
   digitalWrite(PIN_LATCH, LOW);
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   SPI.transfer(hi);  // IC2 data (Ch9-16)
   SPI.transfer(lo);  // IC1 data (Ch1-8)
+  SPI.endTransaction();
   digitalWrite(PIN_LATCH, HIGH);
 }
 
@@ -238,9 +240,10 @@ void shiftWriteEnabled(uint16_t val) {
   debugShiftBytes("shiftWriteEnabled", hi, lo);
   digitalWrite(PIN_OE, HIGH);                   // tri-state outputs before touching shift register
   digitalWrite(PIN_LATCH, LOW);
-  // Write exactly 16 bits — this fully replaces previous register contents
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   SPI.transfer(hi);  // IC2 data (Ch9-16)
   SPI.transfer(lo);  // IC1 data (Ch1-8)
+  SPI.endTransaction();
   digitalWrite(PIN_LATCH, HIGH);                // latch new data while OE is still HIGH (safe)
   if (val != 0) digitalWrite(PIN_OE, LOW);      // now enable — exactly one bit is live
 }
@@ -249,8 +252,10 @@ void disableOutputs() {
   debugShiftBytes("disableOutputs  ", 0x00, 0x00);
   digitalWrite(PIN_OE, HIGH);
   digitalWrite(PIN_LATCH, LOW);
+  SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   SPI.transfer(0x00);
   SPI.transfer(0x00);
+  SPI.endTransaction();
   digitalWrite(PIN_LATCH, HIGH);
 }
 
@@ -1105,9 +1110,9 @@ void loop() {
         uint32_t phase = now % PWM_PERIOD_MS;
         uint32_t onTime = (PWM_PERIOD_MS * pwmDuty) / 100;
         if (phase < onTime) {
-          shiftWriteEnabled((uint16_t)(1u << pulseQ));
+          digitalWrite(PIN_OE, LOW);   // enable output — data already in shift reg
         } else {
-          disableOutputs();
+          digitalWrite(PIN_OE, HIGH);  // tri-state — no SPI needed
         }
       }
     }
